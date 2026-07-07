@@ -1,0 +1,120 @@
+import { i, type InstaQLEntity } from "@instantdb/react-native";
+import type { ColorSchemePreference, PaletteName } from "@/lib/theme";
+
+export type MembershipRole = "admin" | "member";
+export type FriendRequestStatus = "pending" | "accepted" | "declined";
+export type MessageType = "text" | "system";
+
+const _schema = i.schema({
+  entities: {
+    $users: i.entity({
+      email: i.string().unique().indexed(),
+    }),
+    profiles: i.entity({
+      displayName: i.string(),
+      username: i.string().unique().indexed(),
+      avatarUrl: i.string().optional(),
+      bio: i.string().optional(),
+      phone: i.string().optional(),
+      lastSeenAt: i.date(),
+      createdAt: i.date(),
+      paletteName: i.string<PaletteName>(),
+      colorSchemePreference: i.string<ColorSchemePreference>(),
+    }),
+    chats: i.entity({
+      name: i.string().optional(),
+      avatarUrl: i.string().optional(),
+      isGroup: i.boolean(),
+      isCommunity: i.boolean().optional(),
+      createdAt: i.date(),
+      lastMessageAt: i.date(),
+      lastMessagePreview: i.string(),
+    }),
+    memberships: i.entity({
+      role: i.string<MembershipRole>(),
+      joinedAt: i.date(),
+      lastReadAt: i.date(),
+      muted: i.boolean(),
+    }),
+    messages: i.entity({
+      text: i.string(),
+      type: i.string<MessageType>().optional(),
+      createdAt: i.date(),
+      editedAt: i.date().optional(),
+      deletedAt: i.date().optional(),
+    }),
+    statuses: i.entity({
+      content: i.string(),
+      createdAt: i.date(),
+      expiresAt: i.date(),
+    }),
+    statusViews: i.entity({
+      viewedAt: i.date(),
+    }),
+    friendRequests: i.entity({
+      status: i.string<FriendRequestStatus>(),
+      note: i.string().optional(),
+      createdAt: i.date(),
+    }),
+  },
+  links: {
+    profileUser: {
+      forward: { on: "profiles", has: "one", label: "$user" },
+      reverse: { on: "$users", has: "one", label: "profile" },
+    },
+    chatMemberships: {
+      forward: { on: "chats", has: "many", label: "memberships" },
+      reverse: { on: "memberships", has: "one", label: "chat" },
+    },
+    profileMemberships: {
+      forward: { on: "profiles", has: "many", label: "memberships" },
+      reverse: { on: "memberships", has: "one", label: "profile" },
+    },
+    chatMessages: {
+      forward: { on: "chats", has: "many", label: "messages" },
+      reverse: { on: "messages", has: "one", label: "chat" },
+    },
+    profileMessages: {
+      forward: { on: "profiles", has: "many", label: "sentMessages" },
+      reverse: { on: "messages", has: "one", label: "sender" },
+    },
+    statusOwner: {
+      forward: { on: "profiles", has: "many", label: "statuses" },
+      reverse: { on: "statuses", has: "one", label: "owner" },
+    },
+    statusViewsOfStatus: {
+      forward: { on: "statuses", has: "many", label: "views" },
+      reverse: { on: "statusViews", has: "one", label: "status" },
+    },
+    statusViewViewer: {
+      forward: { on: "profiles", has: "many", label: "statusViews" },
+      reverse: { on: "statusViews", has: "one", label: "viewer" },
+    },
+    friendRequestFrom: {
+      forward: { on: "profiles", has: "many", label: "sentFriendRequests" },
+      reverse: { on: "friendRequests", has: "one", label: "from" },
+    },
+    friendRequestTo: {
+      forward: { on: "profiles", has: "many", label: "receivedFriendRequests" },
+      reverse: { on: "friendRequests", has: "one", label: "to" },
+    },
+  },
+});
+
+// Contourne "type instantiation is excessively deep" sur les gros schémas Instant.
+type _AppSchema = typeof _schema;
+interface AppSchema extends _AppSchema {}
+
+const schema: AppSchema = _schema;
+
+export type { AppSchema };
+export default schema;
+
+export type UserEntity = InstaQLEntity<AppSchema, "$users">;
+export type Profile = InstaQLEntity<AppSchema, "profiles">;
+export type Chat = InstaQLEntity<AppSchema, "chats">;
+export type Membership = InstaQLEntity<AppSchema, "memberships">;
+export type Message = InstaQLEntity<AppSchema, "messages">;
+export type Status = InstaQLEntity<AppSchema, "statuses">;
+export type StatusView = InstaQLEntity<AppSchema, "statusViews">;
+export type FriendRequest = InstaQLEntity<AppSchema, "friendRequests">;

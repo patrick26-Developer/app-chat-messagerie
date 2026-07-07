@@ -1,3 +1,1 @@
-# Expo HAS CHANGED
-
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+Voir CLAUDE.md à la racine pour le contexte complet du projet — ce fichier existe uniquement pour les outils qui cherchent AGENTS.md par convention.
