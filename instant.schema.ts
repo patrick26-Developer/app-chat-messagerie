@@ -36,6 +36,7 @@ const _schema = i.schema({
     chats: i.entity({
       name: i.string().optional(),
       avatarUrl: i.string().optional(),
+      description: i.string().optional(),
       isGroup: i.boolean(),
       isCommunity: i.boolean().optional(),
       createdAt: i.date(),
@@ -57,6 +58,7 @@ const _schema = i.schema({
     }),
     statuses: i.entity({
       content: i.string(),
+      backgroundColor: i.string().optional(),
       createdAt: i.date(),
       expiresAt: i.date(),
     }),

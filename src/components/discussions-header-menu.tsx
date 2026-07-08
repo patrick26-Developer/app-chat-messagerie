@@ -11,12 +11,12 @@ type MenuEntry = {
   Icon: typeof Users;
   labelKey: TranslationKey;
   /** Si absent : pas encore d'écran, on affiche une Alert temporaire. */
-  route?: "/settings" | "/new-chat" | "/friend-requests" | "/new-group";
+  route?: "/settings" | "/select-contact" | "/friend-requests" | "/new-group";
 };
 
 const ENTRIES: MenuEntry[] = [
   { key: "newGroup", Icon: Users, labelKey: "discussions.menu.newGroup", route: "/new-group" },
-  { key: "newChat", Icon: UserPlus, labelKey: "discussions.menu.newChat", route: "/new-chat" },
+  { key: "inviteFriend", Icon: UserPlus, labelKey: "discussions.menu.inviteFriend", route: "/select-contact" },
   { key: "friendRequests", Icon: UserCheck, labelKey: "discussions.menu.friendRequests", route: "/friend-requests" },
   { key: "settings", Icon: Settings, labelKey: "discussions.menu.settings", route: "/settings" },
 ];

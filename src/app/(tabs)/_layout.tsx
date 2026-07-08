@@ -1,6 +1,6 @@
-import { Text } from "react-native";
-import { Tabs } from "expo-router";
-import { CircleDot, MessageCircle, User, Users } from "lucide-react-native";
+import { Pressable, Text } from "react-native";
+import { Tabs, useRouter } from "expo-router";
+import { CircleDot, MessageCircle, Plus, User, Users } from "lucide-react-native";
 import { DiscussionsHeaderMenu } from "@/components/discussions-header-menu";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
@@ -8,6 +8,7 @@ import { useTheme } from "@/lib/theme";
 export default function TabsLayout() {
   const { colors } = useTheme();
   const { t } = useI18n();
+  const router = useRouter();
 
   return (
     <Tabs
@@ -54,6 +55,11 @@ export default function TabsLayout() {
           title: t("tabs.communities"),
           tabBarLabel: t("tabs.communities"),
           tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
+          headerRight: () => (
+            <Pressable onPress={() => router.push("/new-community")} className="mr-4" hitSlop={8}>
+              <Plus color={colors.text} size={22} />
+            </Pressable>
+          ),
         }}
       />
       <Tabs.Screen
