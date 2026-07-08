@@ -66,7 +66,7 @@ const rules = {
   // `profiles` (eid = profil de B), alors que la vérification
   // `memberships.create` passait, elle, correctement.
   //
-  // `isBeingAddedToDirectChat` : `request.modifiedFields` doit contenir
+  // `isBeingAddedToChat` : `request.modifiedFields` doit contenir
   // UNIQUEMENT 'memberships' — confirmé via `debugTransact` que ce champ
   // apparaît seul dans ce cas précis (aucun autre champ du profil ne peut
   // être touché par la même opération).
@@ -99,13 +99,13 @@ const rules = {
   profiles: {
     bind: {
       isOwner: "auth.id != null && auth.id in data.ref('$user.id')",
-      isBeingAddedToDirectChat:
+      isBeingAddedToChat:
         "auth.id != null && size(request.modifiedFields) == 1 && 'memberships' in request.modifiedFields",
     },
     allow: {
       view: "true",
       create: "isOwner",
-      update: "isOwner || isBeingAddedToDirectChat",
+      update: "isOwner || isBeingAddedToChat",
       delete: "isOwner",
     },
   },
@@ -211,16 +211,56 @@ const rules = {
   // un `data.ref()` n'a jamais été testé contre le backend Instant réel
   // dans ce projet (contrairement à `in`, déjà confirmé fonctionnel pour
   // `isAdmin`/`isMember` ailleurs dans ce fichier).
+  // Ajout (2026-07-08, "Nouveau groupe") : `isDirectChatCoCreation` exige
+  // `isGroup == false` ET `size(...) <= 2`, donc bloque par construction la
+  // création d'un groupe (isGroup vrai, potentiellement N > 2 membres dès
+  // la création). `isGroupCoCreation` couvre ce cas séparément plutôt que
+  // d'assouplir `isDirectChatCoCreation` (qui doit rester strictement
+  // limité au 1-to-1, avec son plafond à 2).
+  //
+  // Contrairement à `isDirectChatCoCreation`, PAS de plafond de taille ici
+  // — un groupe peut être créé avec un nombre arbitraire de memberships
+  // initiales. Ce n'est pas un trou : la protection "pas d'ajout a
+  // posteriori" ne vient de toute façon PAS de ce bind, elle vient de
+  // `chats.update` (ci-dessus), qui rejette toute modification touchant le
+  // champ `memberships` sur un chat déjà existant — découvert avec le test
+  // 3 de la série précédente (A tente de s'ajouter comme 3ᵉ membre à un
+  // chat 1-to-1 existant, bloqué par `chats.update`, pas par
+  // `isDirectChatCoCreation`). Le même mécanisme s'applique tel quel à un
+  // groupe : `chats.create` ne se déclenche qu'une seule fois dans la vie
+  // d'un chat, donc toute tentative de lier une membership à un groupe qui
+  // existe déjà bascule automatiquement sur `chats.update` (restreint),
+  // jamais sur `chats.create` — pas besoin de vérifier la taille ici pour
+  // obtenir cette distinction "création vs. plus tard".
+  //
+  // MISE EN GARDE pour un futur correctif : si `chats.update` est un jour
+  // élargi pour autoriser `'memberships'` (pour résoudre la limitation déjà
+  // documentée "rejoindre une communauté existante"), ça rouvrirait aussi,
+  // silencieusement, la possibilité d'ajouter des gens à un GROUPE existant
+  // — pas seulement à une communauté — sauf si ce futur correctif est
+  // conditionné précisément (`isCommunity == true` uniquement, pas les
+  // groupes en général). Ne pas élargir `chats.update` sans revérifier cet
+  // impact sur `isGroupCoCreation`.
+  //
+  // Testé empiriquement avant de pousser (voir résultats donnés à
+  // l'utilisateur) : (1) création d'un groupe à 3+ memberships en une
+  // transaction → réussit ; (2) un non-invité tente de s'ajouter après
+  // coup → échoue ; (3) un membre non-admin légitimement co-créé tente
+  // d'ajouter quelqu'un plus tard → échoue aussi ; (4) régression 1-to-1
+  // toujours fonctionnelle ; (6) envoi de message dans un chat de groupe
+  // (pas seulement 1-to-1) → réussit, jamais testé avant ce tour-ci.
   memberships: {
     bind: {
       isOwnMembership: "auth.id != null && auth.id in data.ref('profile.$user.id')",
       isMemberOfChat: "auth.id != null && auth.id in data.ref('chat.memberships.profile.$user.id')",
       isDirectChatCoCreation:
         "auth.id != null && auth.id in data.ref('chat.memberships.profile.$user.id') && false in data.ref('chat.isGroup') && size(data.ref('chat.memberships.id')) <= 2",
+      isGroupCoCreation:
+        "auth.id != null && auth.id in data.ref('chat.memberships.profile.$user.id') && true in data.ref('chat.isGroup')",
     },
     allow: {
       view: "isMemberOfChat",
-      create: "isOwnMembership || isDirectChatCoCreation",
+      create: "isOwnMembership || isDirectChatCoCreation || isGroupCoCreation",
       update: "isOwnMembership",
       delete: "isOwnMembership",
     },
@@ -283,7 +323,7 @@ const rules = {
   //   `accepted` existante.
   // - `newData.status == 'pending'` (accès scalaire direct sur `newData`,
   //   PAS `newData.ref()` — ce dernier n'existe pas dans le DSL Instant,
-  //   déjà découvert et documenté pour `profiles.isBeingAddedToDirectChat` ;
+  //   déjà découvert et documenté pour `profiles.isBeingAddedToChat` ;
   //   mais l'accès à un champ scalaire simple sur `newData`, lui, fonctionne
   //   très bien, testé ci-dessous) : empêche l'expéditeur d'utiliser cette
   //   réouverture pour s'auto-accepter (`declined` -> `accepted` directement)
@@ -295,7 +335,7 @@ const rules = {
   // comme une modification réciproque du profil visé (même phénomène déjà
   // documenté pour `chats`/`memberships`/`messages` plus haut dans ce
   // fichier), ce qui déclenche un `profiles.update` qui échoue puisque
-  // `profiles.isBeingAddedToDirectChat` ne couvre que le cas des memberships,
+  // `profiles.isBeingAddedToChat` ne couvre que le cas des memberships,
   // pas des friendRequests. Le code applicatif (`new-chat.tsx`) ne doit donc
   // reformuler QUE `status` sur la ligne existante, jamais retoucher
   // `from`/`to` s'ils ne changent pas réellement.
@@ -318,8 +358,8 @@ const rules = {
   // sens — permuter `from`/`to` sur la même ligne reproduirait le problème
   // de lien réciproque sur `profiles` déjà rencontré (cf. commentaire
   // ci-dessus et celui au-dessus du bloc `memberships`/`chats` sur
-  // `isBeingAddedToDirectChat`). À résoudre plus tard, probablement en
-  // élargissant `isBeingAddedToDirectChat` ou un bind équivalent sur
+  // `isBeingAddedToChat`). À résoudre plus tard, probablement en
+  // élargissant `isBeingAddedToChat` ou un bind équivalent sur
   // `friendRequests` pour couvrir aussi ce cas d'inversion.
   friendRequests: {
     bind: {
