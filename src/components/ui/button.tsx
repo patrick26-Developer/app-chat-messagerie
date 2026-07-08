@@ -24,7 +24,7 @@ export function Button({ label, onPress, variant = "primary", disabled, loading 
     <TouchableOpacity
       onPress={onPress}
       disabled={isDisabled}
-      className="items-center rounded-lg border py-3"
+      className="items-center rounded-lg border px-4 py-3"
       style={{ backgroundColor, borderColor, opacity: isDisabled ? 0.6 : 1 }}
     >
       {loading ? (

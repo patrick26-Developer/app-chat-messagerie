@@ -15,7 +15,7 @@ const _schema = i.schema({
       username: i.string().unique().indexed(),
       avatarUrl: i.string().optional(),
       bio: i.string().optional(),
-      phone: i.string().optional(),
+      phone: i.string().optional().indexed(),
       lastSeenAt: i.date(),
       createdAt: i.date(),
       paletteName: i.string<PaletteName>(),
@@ -97,6 +97,16 @@ const _schema = i.schema({
     friendRequestTo: {
       forward: { on: "profiles", has: "many", label: "receivedFriendRequests" },
       reverse: { on: "friendRequests", has: "one", label: "to" },
+    },
+  },
+  rooms: {
+    // Room globale unique pour la présence en ligne (pas persisté en base,
+    // typage client uniquement — cf. src/lib/presence.ts).
+    presence: {
+      presence: i.entity({
+        profileId: i.string(),
+        online: i.boolean(),
+      }),
     },
   },
 });

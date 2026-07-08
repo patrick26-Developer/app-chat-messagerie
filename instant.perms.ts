@@ -57,14 +57,55 @@ const rules = {
     },
   },
 
+  // Ajout (chat direct 1-to-1) : établir le lien memberships<->profiles
+  // depuis la transaction d'A déclenche une vérification `profiles.update`
+  // sur le profil de B (pas seulement `memberships.create`), parce
+  // qu'Instant traite l'établissement d'un lien comme une modification des
+  // DEUX entités liées. Confirmé via `debugTransact` (2026-07-07) : sans ce
+  // bind, la transaction entière échouait avec check-pass?:false sur
+  // `profiles` (eid = profil de B), alors que la vérification
+  // `memberships.create` passait, elle, correctement.
+  //
+  // `isBeingAddedToDirectChat` : `request.modifiedFields` doit contenir
+  // UNIQUEMENT 'memberships' — confirmé via `debugTransact` que ce champ
+  // apparaît seul dans ce cas précis (aucun autre champ du profil ne peut
+  // être touché par la même opération).
+  //
+  // Tentative initiale rejetée : je voulais aussi re-vérifier ici même
+  // (chat non-groupe, ≤ 2 memberships) via `newData.ref('memberships.chat
+  // ...')`. Erreur reçue du backend : "No matching overload for function
+  // 'ref'. Overload candidates: _ref" — `newData.ref()` n'existe pas dans
+  // le DSL Instant, seul `data.ref()` est supporté. Décision : ne pas
+  // dupliquer cette vérification ici, elle est déjà faite correctement
+  // ailleurs (voir `isDirectChatCoCreation` sur `memberships`, qui corrèle
+  // sans problème car `membership.chat` est cardinalité "one" — pas la
+  // même relation to-many que celle qui avait fait échouer `chats.isAdmin`).
+  // Comme les deux checks (celui-ci ET celui de la membership créée) doivent
+  // passer ensemble pour que la transaction entière réussisse, la portée
+  // volontairement plus étroite ici (uniquement la liste des champs) reste
+  // sûre : impossible de satisfaire ce bind seul sans que la création de
+  // la membership elle-même passe aussi son propre test de corrélation.
+  //
+  // Testé empiriquement avant de pousser, via `debugTransact` avec override
+  // des règles (donc sans jamais toucher la prod avant confirmation) :
+  // (1) A crée un chat direct avec B (chat + 2 memberships) → réussit.
+  // (2) A tente de modifier displayName de B directement → échoue.
+  // (2b) A tente de modifier avatarUrl de B directement → échoue.
+  // (3) A tente de s'ajouter comme 3ᵉ membre à un chat 1-to-1 déjà existant
+  //     entre B et C → échoue (bloqué par `chats.update`, qui rejette toute
+  //     modification du champ `memberships` sur un chat déjà existant —
+  //     protection incidente mais efficace, en plus du garde-fou
+  //     `isDirectChatCoCreation` côté `memberships`).
   profiles: {
     bind: {
       isOwner: "auth.id != null && auth.id in data.ref('$user.id')",
+      isBeingAddedToDirectChat:
+        "auth.id != null && size(request.modifiedFields) == 1 && 'memberships' in request.modifiedFields",
     },
     allow: {
       view: "true",
       create: "isOwner",
-      update: "isOwner",
+      update: "isOwner || isBeingAddedToDirectChat",
       delete: "isOwner",
     },
   },
@@ -94,6 +135,56 @@ const rules = {
   // chaque changement de rôle dans `memberships`, pour que la règle devienne
   // un simple test sur un champ de la ligne courante (`auth.id in
   // data.adminUserIds`) au lieu d'une corrélation sur une relation to-many.
+  // `update` rouvert (était "false" après la faille isAdmin) mais restreint
+  // via `request.modifiedFields` aux deux seuls champs que l'envoi d'un
+  // message doit pouvoir toucher (lastMessageAt/lastMessagePreview) — le
+  // renommage du groupe (name/avatarUrl/isGroup) reste bloqué pour tout le
+  // monde tant qu'un vrai `isAdmin` fiable n'existe pas.
+  // À VÉRIFIER EMPIRIQUEMENT : `request.modifiedFields` jamais testé contre
+  // le backend réel dans ce projet.
+  //
+  // Limitations connues à traiter plus tard :
+  // - `update` restreint à `lastMessageAt`/`lastMessagePreview`/`messages`
+  //   bloque toujours, par effet de bord, toute tentative de LIER une
+  //   nouvelle MEMBERSHIP à un chat déjà existant — même légitime (ex.
+  //   rejoindre une communauté via invitation). Confirmé en testant le
+  //   point 1 ci-dessus (2026-07-07) : lier une membership à un chat
+  //   déclenche une vérification `chats.update` sur le champ
+  //   `memberships`, qui échoue puisque `memberships` n'est pas dans la
+  //   liste des champs autorisés. À résoudre quand on construira le flux
+  //   "rejoindre un groupe/une communauté" — probablement en ajoutant
+  //   `'memberships'` à la liste des champs autorisés dans `chats.update`,
+  //   sous des conditions à définir (`isCommunity == true` et/ou un statut
+  //   "public" du groupe, pour ne pas rouvrir la possibilité de s'ajouter
+  //   à un 1-to-1 privé déjà existant — cf. le test 3 qui vérifie
+  //   précisément ce cas).
+  //
+  // Correction (2026-07-08) : bug DIFFÉRENT de celui anticipé ci-dessus,
+  // découvert en conditions réelles sur device (pas en test admin) lors
+  // de l'ENVOI D'UN MESSAGE, pas de la création de chat. La création du
+  // chat 1-to-1 avait bien réussi (confirmé en lisant les vraies données :
+  // chat + 2 memberships existantes) ; c'est `handleSend()` dans
+  // `chat/[chatId].tsx` qui échouait. Cause identique en nature à celle
+  // documentée juste au-dessus pour `memberships`, mais appliquée à
+  // `messages` : lier un nouveau message au chat (`.link({ chat: ... })`)
+  // modifie réciproquement le champ `chats.messages`, en plus de l'update
+  // explicite de `lastMessageAt`/`lastMessagePreview` fait dans la même
+  // transaction. Confirmé via `debugTransact` reproduisant exactement la
+  // transaction de `handleSend()` sur les vraies données (vrai chat id,
+  // vrai profile id, vrai compte via `db.asUser`) :
+  //   chats.update -> check-pass?=false
+  //   modified-fields: ['messages', 'lastMessageAt', 'lastMessagePreview']
+  // `'messages'` n'étant pas dans la liste autorisée, `.all(...)` échouait
+  // et rejetait toute la transaction (alors que `messages.create` et
+  // `profiles.update` passaient très bien individuellement).
+  // `'messages'` ajouté à la liste, toujours conditionné à `isMember`
+  // (donc uniquement un membre du chat peut faire apparaître ce champ
+  // dans `modifiedFields`, jamais un étranger). Testé empiriquement avant
+  // de pousser (voir résultats donnés à l'utilisateur) : (1) envoi normal
+  // entre les 2 comptes réels → réussit désormais ; (2) un membre tente de
+  // lier un message appartenant à un AUTRE chat vers celui-ci → échoue
+  // (bloqué par `messages.update = isSender`, qui reste inchangé) ; (3) un
+  // non-membre du chat → toujours bloqué par `isMember`.
   chats: {
     bind: {
       isMember: "auth.id != null && auth.id in data.ref('memberships.profile.$user.id')",
@@ -101,19 +192,35 @@ const rules = {
     allow: {
       view: "isMember",
       create: "isMember",
-      update: "false",
+      update: "isMember && request.modifiedFields.all(f, f in ['lastMessageAt', 'lastMessagePreview', 'messages'])",
       delete: "false",
     },
   },
 
+  // Ajout (chat direct 1-to-1, pas d'étape d'acceptation) : créer une
+  // discussion suppose de créer MA membership ET celle de l'autre personne
+  // dans la même transaction — `isOwnMembership` seul ne l'autorise pas.
+  // `isDirectChatCoCreation` couvre exactement ce cas : je suis déjà membre
+  // du chat (via ma propre membership créée dans la même transaction),
+  // le chat n'est pas un groupe, ET il ne compte pas plus de 2 memberships
+  // (le `size(...) <= 2` empêche qu'un membre d'un 1-to-1 existant ajoute
+  // furtivement une 3ᵉ personne plus tard — sans ça, la règle resterait
+  // ouverte indéfiniment, pas seulement à la création).
+  //
+  // À VÉRIFIER EMPIRIQUEMENT avant de considérer ça fiable : `size()` sur
+  // un `data.ref()` n'a jamais été testé contre le backend Instant réel
+  // dans ce projet (contrairement à `in`, déjà confirmé fonctionnel pour
+  // `isAdmin`/`isMember` ailleurs dans ce fichier).
   memberships: {
     bind: {
       isOwnMembership: "auth.id != null && auth.id in data.ref('profile.$user.id')",
       isMemberOfChat: "auth.id != null && auth.id in data.ref('chat.memberships.profile.$user.id')",
+      isDirectChatCoCreation:
+        "auth.id != null && auth.id in data.ref('chat.memberships.profile.$user.id') && false in data.ref('chat.isGroup') && size(data.ref('chat.memberships.id')) <= 2",
     },
     allow: {
       view: "isMemberOfChat",
-      create: "isOwnMembership",
+      create: "isOwnMembership || isDirectChatCoCreation",
       update: "isOwnMembership",
       delete: "isOwnMembership",
     },
@@ -163,15 +270,68 @@ const rules = {
     },
   },
 
+  // Ajout (2026-07-08) : permettre à l'expéditeur d'origine de rouvrir sa
+  // propre demande refusée (status declined -> pending) pour changer d'avis
+  // plus tard, en réutilisant la MÊME ligne plutôt que d'en créer une
+  // seconde — évite d'avoir besoin d'une contrainte d'unicité en base sur
+  // la paire (from, to).
+  //
+  // `isSenderReopeningDeclined` restreint ça au strict nécessaire :
+  // - `data.status == 'declined'` (accès scalaire direct, PAS `data.ref()` —
+  //   ce n'est pas un lien, juste un champ de la ligne courante) : ne
+  //   s'applique qu'à une demande déjà refusée, jamais à une `pending` ou
+  //   `accepted` existante.
+  // - `newData.status == 'pending'` (accès scalaire direct sur `newData`,
+  //   PAS `newData.ref()` — ce dernier n'existe pas dans le DSL Instant,
+  //   déjà découvert et documenté pour `profiles.isBeingAddedToDirectChat` ;
+  //   mais l'accès à un champ scalaire simple sur `newData`, lui, fonctionne
+  //   très bien, testé ci-dessous) : empêche l'expéditeur d'utiliser cette
+  //   réouverture pour s'auto-accepter (`declined` -> `accepted` directement)
+  //   — il ne peut remettre le statut qu'à `pending`, jamais `accepted`.
+  //
+  // IMPORTANT découvert en testant : réutiliser la ligne ne doit PAS
+  // rappeler `.link({ from, to })` avec les mêmes valeurs qu'avant, même
+  // si elles ne changent pas "vraiment" — Instant traite quand même ça
+  // comme une modification réciproque du profil visé (même phénomène déjà
+  // documenté pour `chats`/`memberships`/`messages` plus haut dans ce
+  // fichier), ce qui déclenche un `profiles.update` qui échoue puisque
+  // `profiles.isBeingAddedToDirectChat` ne couvre que le cas des memberships,
+  // pas des friendRequests. Le code applicatif (`new-chat.tsx`) ne doit donc
+  // reformuler QUE `status` sur la ligne existante, jamais retoucher
+  // `from`/`to` s'ils ne changent pas réellement.
+  //
+  // Testé empiriquement avant de pousser, via `debugTransact` (comptes de
+  // test synthétiques, pas les vrais comptes) :
+  // (1) A (expéditeur d'origine) rouvre sa demande refusée vers B (status
+  //     seul, sans re-`.link()`) → réussit.
+  // (2) A tente d'exploiter ce chemin pour passer directement à `accepted`
+  //     → échoue (bloqué par `newData.status == 'pending'`).
+  // (3) B (destinataire) accepte normalement une demande pending fraîche
+  //     → réussit toujours (non régressé).
+  // (4) Un tiers C tente de modifier la demande entre A et B → échoue
+  //     toujours (non régressé).
+  //
+  // Limitation connue à traiter plus tard : seul l'expéditeur d'origine (A)
+  // peut rouvrir une demande refusée via `isSenderReopeningDeclined`. Si
+  // c'est le DESTINATAIRE (B) qui change d'avis après avoir refusé, il n'a
+  // actuellement aucun moyen d'initier une nouvelle demande dans l'autre
+  // sens — permuter `from`/`to` sur la même ligne reproduirait le problème
+  // de lien réciproque sur `profiles` déjà rencontré (cf. commentaire
+  // ci-dessus et celui au-dessus du bloc `memberships`/`chats` sur
+  // `isBeingAddedToDirectChat`). À résoudre plus tard, probablement en
+  // élargissant `isBeingAddedToDirectChat` ou un bind équivalent sur
+  // `friendRequests` pour couvrir aussi ce cas d'inversion.
   friendRequests: {
     bind: {
       isSender: "auth.id != null && auth.id in data.ref('from.$user.id')",
       isReceiver: "auth.id != null && auth.id in data.ref('to.$user.id')",
+      isSenderReopeningDeclined:
+        "auth.id != null && auth.id in data.ref('from.$user.id') && data.status == 'declined' && newData.status == 'pending'",
     },
     allow: {
       view: "isSender || isReceiver",
       create: "isSender",
-      update: "isReceiver",
+      update: "isReceiver || isSenderReopeningDeclined",
       delete: "isSender || isReceiver",
     },
   },

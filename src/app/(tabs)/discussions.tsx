@@ -1,15 +1,19 @@
 import { ScrollView, Text } from "react-native";
+import { useRouter } from "expo-router";
 import { MessageCircle } from "lucide-react-native";
 import { Avatar, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
 import { db } from "@/lib/db";
 import { useI18n } from "@/lib/i18n";
+import { useOnlineProfileIds } from "@/lib/presence";
 import { useOwnProfile } from "@/lib/profile";
 import { useTheme } from "@/lib/theme";
 
 export default function DiscussionsScreen() {
   const { colors } = useTheme();
   const { t } = useI18n();
+  const router = useRouter();
   const { profile, isLoading: isProfileLoading } = useOwnProfile();
+  const onlineIds = useOnlineProfileIds();
 
   const membershipsQuery = db.useQuery(
     profile
@@ -63,13 +67,16 @@ export default function DiscussionsScreen() {
             minute: "2-digit",
           });
 
+          const isOtherOnline = !chat.isGroup && otherMember ? onlineIds.has(otherMember.id) : false;
+
           return (
             <ListItem
               key={membership.id}
               index={index}
-              leading={<Avatar uri={avatarUri} name={avatarName} size={48} />}
+              leading={<Avatar uri={avatarUri} name={avatarName} size={48} online={isOtherOnline} />}
               title={title}
               subtitle={chat.lastMessagePreview}
+              onPress={() => router.push({ pathname: "/chat/[chatId]", params: { chatId: chat.id } })}
               trailing={
                 <Text className="text-xs" style={{ color: colors.textMuted }}>
                   {time}
