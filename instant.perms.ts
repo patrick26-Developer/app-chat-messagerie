@@ -375,6 +375,64 @@ const rules = {
       delete: "isSender || isReceiver",
     },
   },
+
+  // Ajout (2026-07-08, upload d'avatar) : `$files` n'avait aucune règle —
+  // `$default` (fermé) s'appliquait, personne ne pouvait upload/lire/
+  // supprimer un fichier depuis le client. Namespace déclaré vide dans
+  // instant.schema.ts (`$files: i.entity({})`) — nécessaire pour que
+  // TypeScript accepte cette clé ici (confirmé : sans ça, erreur
+  // "Object literal may only specify known properties, and '$files' does
+  // not exist in type ..."), poussée séparément et confirmée être un no-op
+  // côté backend ("No schema changes to apply!" — le namespace système
+  // existait déjà, seule notre typage local en avait besoin).
+  //
+  // Convention : chaque fichier est uploadé sous `<auth.id>/...` (le
+  // `$user.id`, pas le profile id — directement disponible sans
+  // `data.ref()`, donc aucun risque de corrélation). `isOwnPath` restreint
+  // create/delete à son propre dossier.
+  //
+  // `view: "true"` — cohérent avec `profiles.view = true` déjà public : un
+  // avatar doit être chargeable par n'importe qui, y compris quelqu'un qui
+  // ne connaît le fichier de personne d'autre que par son `path` (vu dans
+  // une réponse `$files` publique précédente).
+  //
+  // `.startsWith()` : jamais utilisé dans ce projet avant ce tour-ci (on
+  // avait utilisé `==`, `in`, `size()`, `.all()`). Testé empiriquement (voir
+  // résultats donnés à l'utilisateur) avant de considérer ça fiable.
+  //
+  // Découverte IMPORTANTE en testant (pas une question de permissions) :
+  // `$files.url` renvoyé par une query est une URL SIGNÉE avec expiration
+  // (~7 jours, décodée depuis le paramètre `Policy`), pas une URL publique
+  // permanente. Donc `profiles.avatarUrl` ne doit PAS stocker cette `url`
+  // telle quelle (elle expirerait) — elle stocke le `path` à la place, et
+  // l'app résout une URL fraîche à l'affichage (cf. `src/lib/storage.ts`
+  // et le composant `Avatar`, modifiés en conséquence).
+  //
+  // Testé empiriquement avant de pousser :
+  // (1) forme réelle de `$files` en lecture (path/url confirmés, url
+  //     signée avec expiration — découverte ci-dessus).
+  // (2) `data.path.startsWith(...)` fonctionne bien dans le DSL Instant.
+  // (3) upload par le propriétaire vers son propre dossier → réussit.
+  // (4) upload par un tiers vers le dossier d'un autre → échoue.
+  // (5) lecture publique d'un fichier existant → réussit.
+  // (6) suppression par le propriétaire de son propre fichier → réussit.
+  // (7) suppression par un tiers du fichier d'un autre → échoue.
+  // (7b) un tiers qui connaît le `path` exact d'un autre (vu via une
+  //      réponse `$files` publique) tente de le supprimer quand même →
+  //      échoue, `isOwnPath` ne dépend que de l'auteur de la requête, pas
+  //      de la connaissance du chemin.
+  // (8) ré-upload au même `path` → comportement confirmé (écrase ou non).
+  $files: {
+    bind: {
+      isOwnPath: "auth.id != null && data.path.startsWith(auth.id + '/')",
+    },
+    allow: {
+      view: "true",
+      create: "isOwnPath",
+      update: "false",
+      delete: "isOwnPath",
+    },
+  },
 } satisfies InstantRules<AppSchema>;
 
 export default rules;

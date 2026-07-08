@@ -10,6 +10,18 @@ const _schema = i.schema({
     $users: i.entity({
       email: i.string().unique().indexed(),
     }),
+    // Namespace système géré par Instant (storage). `path`/`url` déclarés
+    // uniquement pour le TYPAGE de lecture (`where: { path }`, lire
+    // `$files.url`) — l'écriture reste de toute façon bloquée par la
+    // validation interne d'Instant (confirmé empiriquement : un
+    // `.update({ path })` générique échoue avec "Missing required
+    // attribute $files/location-id/size", pas une erreur de permission —
+    // même famille de protection que `$users.email`). Seul le vrai
+    // endpoint `db.storage.uploadFile()` peut créer une ligne `$files`.
+    $files: i.entity({
+      path: i.string(),
+      url: i.string(),
+    }),
     profiles: i.entity({
       displayName: i.string(),
       username: i.string().unique().indexed(),

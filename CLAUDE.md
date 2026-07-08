@@ -87,3 +87,43 @@ anglais, basé à Brazzaville.
   uniquement dans la chaîne d'outils Expo (xcode/config-plugins/cli), jamais
   bundlées dans l'app runtime. Confirmé le 2026-07-05. À réévaluer si
   CI/CD externe ajouté ou montée de version majeure Expo.
+
+## Patterns retenus
+
+- **InstantDB Storage (`$files`) renvoie des URLs signées qui expirent**
+  (~7 jours, confirmé empiriquement en décodant le paramètre `Policy` d'une
+  URL réelle) — ce n'est PAS une URL publique permanente. Ne JAMAIS stocker
+  cette `url` directement dans un champ persistant (`profiles.avatarUrl`
+  stocke un `path`, résolu en URL fraîche à l'affichage via
+  `src/lib/storage.ts` / `useResolvedAvatarUri`, consommé automatiquement
+  par le composant `Avatar`). Tout futur usage du storage (ex. photo de
+  statut, si ajoutée un jour) doit suivre ce même pattern : stocker le
+  `path`, jamais l'`url`.
+  - Compromis connu, non résolu : chaque `Avatar` affiché résout son
+    `path` via sa propre requête `$files` — pas de N+1 façon REST (tout est
+    multiplexé sur le même WebSocket Instant), mais une vraie souscription
+    serveur distincte par `path` différent affiché à l'écran (confirmé en
+    lisant `Reactor.js` : le cache de requêtes déduplique par hash exact,
+    donc seulement si le même `path` est affiché plusieurs fois). Un design
+    avec `i.link($files, profiles)` aurait permis d'inclure l'avatar dans
+    la requête parente (ex. `discussions.tsx`) en une seule fois. Pas
+    problématique à l'échelle actuelle (listes de dizaines d'items), mais à
+    revisiter si des listes beaucoup plus longues apparaissent.
+
+- **Upload de fichier client → InstantDB Storage : `new File(uri)` d'expo-file-system,
+  passé tel quel, sans détour.** `db.storage.uploadFile(path, file, opts)` attend
+  `File | Blob`. Sur Android/Hermes, `fetch(uri).blob()` sur un asset
+  `ImagePicker` échoue avec `"Creating blobs from 'ArrayBuffer' and
+  'ArrayBufferView' are not supported"` (le Blob RN ne se construit qu'à
+  partir de `Blob`/`string`, jamais d'ArrayBuffer/TypedArray — confirmé en
+  lisant `BlobManager.createFromParts`). Le détour base64 → URI `data:` →
+  `fetch()` ne fonctionne pas non plus : `fetch()` rejette explicitement le
+  schéma `data:` sur Android avec `"unknown protocol: data"` (confirmé
+  empiriquement sur Pixel 9a). **Solution retenue** : l'API moderne
+  `File` d'`expo-file-system` (import `from "expo-file-system"`, PAS
+  `/legacy`) implémente directement l'interface `Blob` (`size`, `type`,
+  `slice()`, `arrayBuffer()`, `stream()`, `text()`) — `new File(uri)` se
+  passe donc directement à `uploadFile()` sans aucune conversion
+  (pas de base64, pas d'URI `data:`, pas de `fetch()`). Tout futur upload
+  de fichier dans l'app (ex. photo de statut, si ajoutée un jour) doit
+  suivre ce chemin direct.

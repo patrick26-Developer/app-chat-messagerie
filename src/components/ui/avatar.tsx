@@ -1,5 +1,6 @@
 import { Text, View } from "react-native";
 import { Image } from "expo-image";
+import { useResolvedAvatarUri } from "@/lib/storage";
 import { useTheme } from "@/lib/theme";
 
 type AvatarProps = {
@@ -21,13 +22,14 @@ function getInitials(name: string | undefined): string {
 
 export function Avatar({ uri, name, size = 40, online }: AvatarProps) {
   const { colors } = useTheme();
+  const resolvedUri = useResolvedAvatarUri(uri);
   const dimensionStyle = { width: size, height: size, borderRadius: size / 2 };
   const dotSize = Math.max(10, Math.round(size * 0.28));
 
   return (
     <View style={{ width: size, height: size }}>
-      {uri ? (
-        <Image source={{ uri }} style={dimensionStyle} contentFit="cover" />
+      {resolvedUri ? (
+        <Image source={{ uri: resolvedUri }} style={dimensionStyle} contentFit="cover" />
       ) : (
         <View className="items-center justify-center" style={{ ...dimensionStyle, backgroundColor: colors.accent }}>
           <Text style={{ color: colors.onAccent, fontSize: size * 0.4, fontWeight: "600" }}>{getInitials(name)}</Text>
