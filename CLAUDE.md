@@ -67,6 +67,18 @@ anglais, basé à Brazzaville.
 - Ne jamais introduire de nouvelle dépendance sans le dire explicitement
   dans la réponse.
 
+## Méthodologie de test des permissions
+
+- **`debugTransact` ne simule pas correctement les liens établis via une
+  étiquette reverse fraîchement créée dans la même transaction** (ex.
+  `owner`/`contact` sur `contacts`, définis forward côté `profiles` et
+  reverse côté `contacts` — contrairement à une étiquette forward comme
+  `sourceRequest`, qui fonctionne bien en simulation). Pour tester une
+  règle `create` qui dépend de tels liens (cf. `contacts.isAcceptedByReceiver`
+  dans `instant.perms.ts` pour le détail complet et les tests), utiliser
+  de vrais comptes synthétiques via `db.asUser({email}).transact(...)` à
+  la place — jamais `debugTransact` seul pour ce cas précis.
+
 ## Où on en est
 
 - [X] Setup Nativewind + config Tailwind (fait)

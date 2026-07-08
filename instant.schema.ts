@@ -68,6 +68,9 @@ const _schema = i.schema({
       note: i.string().optional(),
       createdAt: i.date(),
     }),
+    contacts: i.entity({
+      createdAt: i.date(),
+    }),
   },
   links: {
     profileUser: {
@@ -110,6 +113,18 @@ const _schema = i.schema({
       forward: { on: "profiles", has: "many", label: "receivedFriendRequests" },
       reverse: { on: "friendRequests", has: "one", label: "to" },
     },
+    contactOwner: {
+      forward: { on: "profiles", has: "many", label: "contacts" },
+      reverse: { on: "contacts", has: "one", label: "owner" },
+    },
+    contactPeer: {
+      forward: { on: "profiles", has: "many", label: "contactedBy" },
+      reverse: { on: "contacts", has: "one", label: "contact" },
+    },
+    contactSourceRequest: {
+      forward: { on: "contacts", has: "one", label: "sourceRequest" },
+      reverse: { on: "friendRequests", has: "many", label: "resultingContacts" },
+    },
   },
   rooms: {
     // Room globale unique pour la présence en ligne (pas persisté en base,
@@ -140,3 +155,4 @@ export type Message = InstaQLEntity<AppSchema, "messages">;
 export type Status = InstaQLEntity<AppSchema, "statuses">;
 export type StatusView = InstaQLEntity<AppSchema, "statusViews">;
 export type FriendRequest = InstaQLEntity<AppSchema, "friendRequests">;
+export type Contact = InstaQLEntity<AppSchema, "contacts">;

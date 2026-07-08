@@ -96,16 +96,63 @@ const rules = {
   //     modification du champ `memberships` sur un chat déjà existant —
   //     protection incidente mais efficace, en plus du garde-fou
   //     `isDirectChatCoCreation` côté `memberships`).
+  // Ajout (2026-07-08) : bug préexistant découvert PENDANT le travail sur
+  // la fonctionnalité "contacts" (sans rapport direct avec elle) — en
+  // testant si une nouvelle friendRequest peut être renvoyée après
+  // suppression d'un contact, `debugTransact` a révélé que
+  // `friendRequests.create` échoue TOUJOURS en prod aujourd'hui pour toute
+  // demande vers un destinataire différent de soi-même. Cause : établir
+  // le lien `.link({ from, to })` touche réciproquement
+  // `profiles.sentFriendRequests` (expéditeur) ET
+  // `profiles.receivedFriendRequests` (destinataire) — même mécanique déjà
+  // documentée pour `memberships`/`messages`/`contacts` ailleurs dans ce
+  // fichier. Pour l'expéditeur (auth), `isOwner` couvre déjà le cas
+  // (n'importe quel champ modifié sur son propre profil passe). Pour le
+  // DESTINATAIRE (pas auth), ni `isOwner` ni `isBeingAddedToChat` (qui ne
+  // couvre que le champ `'memberships'`) ne s'appliquaient — confirmé via
+  // `debugTransact` avec les règles EXACTES alors en prod : check
+  // `profiles.update` sur le destinataire → check-pass?:false,
+  // modified-fields:["receivedFriendRequests"].
+  //
+  // `isBeingAddedAsFriendRequestParty` comble ce trou, même famille que
+  // `isBeingAddedToChat`.
+  //
+  // Testé empiriquement avant de pousser (voir résultats donnés à
+  // l'utilisateur) :
+  // (1) A envoie une demande à B (profils différents, aucune relation
+  //     existante) → réussit désormais.
+  // (2a) C tente de modifier `displayName` de A directement (sans lien
+  //      friendRequest dans la même transaction) → toujours bloqué.
+  // (2b) C envoie une VRAIE demande à A (touche légitimement
+  //      `receivedFriendRequests`) mais glisse aussi une modification de
+  //      `displayName` dans la même transaction → toujours bloqué dans son
+  //      ensemble (`.all(f, ...)` rejette dès qu'un champ hors liste
+  //      apparaît, peu importe qu'un autre champ de la même transaction
+  //      soit légitime).
+  // (3) Après suppression d'une friendRequest existante (cf. flux "retirer
+  //     un contact"), renvoyer une nouvelle demande → réussit.
   profiles: {
     bind: {
       isOwner: "auth.id != null && auth.id in data.ref('$user.id')",
       isBeingAddedToChat:
         "auth.id != null && size(request.modifiedFields) == 1 && 'memberships' in request.modifiedFields",
+      isBeingAddedAsFriendRequestParty:
+        "auth.id != null && request.modifiedFields.all(f, f in ['sentFriendRequests', 'receivedFriendRequests'])",
+      // Ajout (2026-07-08, fonctionnalité "contacts") : créer les 2 lignes
+      // symétriques `contacts` à l'acceptation d'une friendRequest touche
+      // réciproquement `profiles.contacts` (label owner) ET
+      // `profiles.contactedBy` (label contact) sur LES DEUX profils
+      // impliqués — même mécanique que `isBeingAddedToChat`/
+      // `isBeingAddedAsFriendRequestParty`. Confirmé via `debugTransact`
+      // (test 2 de la série "contacts") : les deux profils voient
+      // modified-fields=["contacts","contactedBy"].
+      isBeingAddedAsContact:
+        "auth.id != null && request.modifiedFields.all(f, f in ['contacts', 'contactedBy'])",
     },
     allow: {
       view: "true",
       create: "isOwner",
-      update: "isOwner || isBeingAddedToChat",
+      update: "isOwner || isBeingAddedToChat || isBeingAddedAsFriendRequestParty || isBeingAddedAsContact",
       delete: "isOwner",
     },
   },
@@ -285,12 +332,30 @@ const rules = {
     },
   },
 
+  // Ajout (2026-07-08) : `view` était limité à `isOwner` uniquement, avec
+  // une note documentant que corréler "auth est un contact du owner" via
+  // `data.ref()` sur une relation to-many n'avait jamais été testé et
+  // risquait de reproduire le bug `isAdmin` (corrélation ligne par ligne
+  // non fiable sur `data.ref()`). La nouvelle entité `contacts` (une ligne
+  // par relation confirmée, cf. bloc `contacts` plus bas) permet une
+  // vérification à chemin UNIQUE, du même type que `chats.isMember`
+  // (`data.ref('memberships.profile.$user.id')`), donc sans ce risque de
+  // corrélation.
+  //
+  // `isContact` : chaîne à 4 hops (owner → contacts → contact → $user →
+  // id), jamais testée à cette profondeur dans ce projet (le précédent
+  // maximum confirmé était 3 hops). Testé empiriquement avant de pousser
+  // (voir résultats donnés à l'utilisateur) : (7) B, contact confirmé de
+  // A, voit le statut de A → réussit ; régression : A voit toujours son
+  // propre statut. (8) C, sans relation de contact avec A, ne voit pas
+  // son statut → bloqué.
   statuses: {
     bind: {
       isOwner: "auth.id != null && auth.id in data.ref('owner.$user.id')",
+      isContact: "auth.id != null && auth.id in data.ref('owner.contacts.contact.$user.id')",
     },
     allow: {
-      view: "isOwner",
+      view: "isOwner || isContact",
       create: "isOwner",
       update: "isOwner",
       delete: "isOwner",
@@ -373,6 +438,95 @@ const rules = {
       create: "isSender",
       update: "isReceiver || isSenderReopeningDeclined",
       delete: "isSender || isReceiver",
+    },
+  },
+
+  // Ajout (2026-07-08, entité "contacts") : remplace le pari abandonné sur
+  // `statuses.view` (corrélation `data.ref()` non fiable sur une relation
+  // to-many, cf. commentaire sur `isAdmin` plus haut) par une entité
+  // dédiée — une ligne par relation confirmée, avec un chemin de lecture
+  // UNIQUE (pas de corrélation entre deux champs de la même relation).
+  //
+  // Design : 2 lignes SYMÉTRIQUES créées ensemble à l'acceptation d'une
+  // friendRequest ({owner:A, contact:B} ET {owner:B, contact:A}), plutôt
+  // qu'une seule ligne canonique — permet à `statuses.isContact` de lire
+  // via un chemin unique (`owner.contacts.contact.$user.id`), du même
+  // style que `chats.isMember`, au lieu d'un OR de deux chaînes à 3+ hops
+  // chacune (jamais utilisé dans ce projet, risque jugé inutile).
+  //
+  // `isPartOfContact` : auth est l'un des deux profils de la ligne
+  // (`owner` OU `contact`) — utilisé pour `view`/`delete`, permet à
+  // N'IMPORTE LAQUELLE des deux parties de voir ou de retirer le contact,
+  // même si elle n'est que `contact` (pas `owner`) sur cette ligne précise.
+  //
+  // `isAcceptedByReceiver` : restreint la création aux lignes réellement
+  // justifiées par une friendRequest acceptée dont l'auteur de la
+  // transaction est le DESTINATAIRE (`sourceRequest.to`), ET dont les deux
+  // profils de la ligne (`owner`/`contact`) correspondent exactement aux
+  // deux extrémités de cette même demande (`from`/`to`, dans un sens ou
+  // l'autre) — sans cette dernière clause, un receveur légitime pourrait
+  // exploiter SA PROPRE demande acceptée pour fabriquer un faux contact
+  // entre deux tiers sans rapport (faille réelle, confirmée en test avant
+  // correction, cf. ci-dessous).
+  //
+  // MÉTHODOLOGIE DE TEST — écart par rapport au protocole habituel :
+  // `debugTransact` s'est avéré RENDRE INVISIBLES, dans les bindings
+  // simulés, les liens établis via une étiquette reverse (`owner`/
+  // `contact`, définis forward côté `profiles` et reverse côté `contacts`)
+  // fraîchement créés DANS LA MÊME transaction simulée — confirmé en
+  // dumpant les bindings bruts (`owner`/`contact` absents de `new-data`,
+  // alors que `sourceRequest`, une étiquette forward définie directement
+  // sur `contacts`, y apparaît correctement). La même transaction, via un
+  // vrai `db.transact()`, persiste et résout `owner`/`contact`
+  // parfaitement (vérifié par requête directe). Plusieurs formulations
+  // CEL de la corrélation ont d'abord semblé toutes échouer de façon
+  // incohérente selon l'ordre des appels `debugTransact` — la cause
+  // réelle n'était PAS la syntaxe CEL mais cette limitation de
+  // `debugTransact` pour ce cas précis (lien reverse + création dans la
+  // même transaction simulée).
+  //
+  // En conséquence, la validation de `create` (et uniquement `create`) a
+  // été faite via de VRAIS `db.asUser({email}).transact(...)` avec des
+  // comptes synthétiques (pas `debugTransact`) — un refus de permission
+  // ne commite rien, donc sans risque. `view`/`delete` restent validés
+  // via `debugTransact` sur des lignes déjà réellement commitées
+  // (aucune limitation dans ce cas, confirmé).
+  //
+  // Testé empiriquement avant de pousser (voir résultats donnés à
+  // l'utilisateur) :
+  // (1) création symétrique des 2 lignes par B (receiver) → réussit.
+  // (2) modified-fields sur les 2 profils → ["contacts","contactedBy"].
+  // (3) B tente aussi de modifier displayName de A dans la même
+  //     transaction → toute la transaction échoue.
+  // (5b) B exploite SA PROPRE demande acceptée (sans rapport avec A) pour
+  //      fabriquer un contact entre A et un tiers → échoue désormais
+  //      (confirmé via vrai `asUser().transact()`, après correction).
+  // (1/2 légitimes, sens direct ET inverse) → réussissent toujours après
+  //      correction (régression vérifiée).
+  // (6) tiers hors paire : view/create/delete sur un contact entre A et B
+  //     → bloqué sur les trois.
+  // (9) suppression par l'une ou l'autre partie, qu'elle soit `owner` OU
+  //     `contact` sur la ligne → réussit dans les deux cas.
+  // (11) la suppression ne déclenche PAS de vérification réciproque sur
+  //      `profiles` (contrairement à la création) — confirmé.
+  //
+  // Suppression d'un contact : supprime aussi la friendRequest d'origine
+  // (perte de la trace from/to, jugée acceptable — pas d'écran d'audit
+  // dans cette app) plutôt que d'introduire un nouveau statut — `delete`
+  // sur `friendRequests` est déjà ouvert à `isSender || isReceiver`,
+  // aucune permission supplémentaire requise pour ce flux.
+  contacts: {
+    bind: {
+      isPartOfContact:
+        "auth.id != null && (auth.id in data.ref('owner.$user.id') || auth.id in data.ref('contact.$user.id'))",
+      isAcceptedByReceiver:
+        "auth.id != null && auth.id in data.ref('sourceRequest.to.$user.id') && 'accepted' in data.ref('sourceRequest.status') && ((data.ref('owner.id') == data.ref('sourceRequest.from.id') && data.ref('contact.id') == data.ref('sourceRequest.to.id')) || (data.ref('owner.id') == data.ref('sourceRequest.to.id') && data.ref('contact.id') == data.ref('sourceRequest.from.id')))",
+    },
+    allow: {
+      view: "isPartOfContact",
+      create: "isAcceptedByReceiver",
+      update: "false",
+      delete: "isPartOfContact",
     },
   },
 

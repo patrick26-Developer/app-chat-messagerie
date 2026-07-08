@@ -1,5 +1,6 @@
 import { ScrollView, Text, View } from "react-native";
 import { Stack } from "expo-router";
+import { id } from "@instantdb/react-native";
 import { Avatar, Button, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
 import { db } from "@/lib/db";
 import { useI18n } from "@/lib/i18n";
@@ -48,7 +49,20 @@ export default function FriendRequestsScreen() {
   const sent = sentQuery.data?.friendRequests ?? [];
   const isLoading = receivedQuery.isLoading || sentQuery.isLoading;
 
-  async function handleRespond(requestId: string, status: FriendRequestStatus) {
+  async function handleRespond(requestId: string, fromProfileId: string | undefined, status: FriendRequestStatus) {
+    if (status === "accepted" && fromProfileId && myProfile) {
+      const now = new Date().toISOString();
+      await db.transact([
+        db.tx.friendRequests[requestId].update({ status }),
+        db.tx.contacts[id()]
+          .update({ createdAt: now })
+          .link({ owner: fromProfileId, contact: myProfile.id, sourceRequest: requestId }),
+        db.tx.contacts[id()]
+          .update({ createdAt: now })
+          .link({ owner: myProfile.id, contact: fromProfileId, sourceRequest: requestId }),
+      ]);
+      return;
+    }
     await db.transact(db.tx.friendRequests[requestId].update({ status }));
   }
 
@@ -88,12 +102,12 @@ export default function FriendRequestsScreen() {
                     <Button
                       label={t("friendRequests.accept")}
                       variant="primary"
-                      onPress={() => handleRespond(request.id, "accepted")}
+                      onPress={() => handleRespond(request.id, request.from?.id, "accepted")}
                     />
                     <Button
                       label={t("friendRequests.decline")}
                       variant="danger"
-                      onPress={() => handleRespond(request.id, "declined")}
+                      onPress={() => handleRespond(request.id, request.from?.id, "declined")}
                     />
                   </View>
                 }
