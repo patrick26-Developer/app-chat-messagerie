@@ -114,17 +114,17 @@ export default function DiscussionsScreen() {
     <ScreenContainer>
       <View className="px-4 pt-3">
         <View
-          className="flex-row items-center gap-2 rounded-full px-4 py-2"
-          style={{ backgroundColor: colors.inputBackground }}
+          className="flex-row items-center gap-2 rounded-full px-3"
+          style={{ backgroundColor: colors.inputBackground, paddingVertical: 7 }}
         >
-          <Search color={colors.placeholder} size={18} />
+          <Search color={colors.placeholder} size={16} />
           <TextInput
             value={query}
             onChangeText={setQuery}
             placeholder={t("discussions.searchPlaceholder")}
             placeholderTextColor={colors.placeholder}
-            className="flex-1 text-base"
-            style={{ color: colors.text }}
+            className="flex-1 text-sm"
+            style={{ color: colors.text, paddingVertical: 0 }}
           />
         </View>
 
