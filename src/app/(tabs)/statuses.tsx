@@ -28,22 +28,26 @@ export default function StatusesScreen() {
   const contactsQuery = db.useQuery(
     myProfile ? { contacts: { $: { where: { owner: myProfile.id } }, contact: {} } } : null,
   );
-  // Mémoïsé sur contactsQuery.data (stable tant qu'aucune nouvelle donnée
-  // n'arrive du serveur) — sinon un nouveau tableau reconstruit à chaque
-  // render change le hash de statusesQuery à chaque fois et provoque une
-  // resouscription en boucle ("Maximum update depth exceeded").
-  const contactProfileIds = useMemo(
-    () =>
-      (contactsQuery.data?.contacts ?? [])
-        .map((row) => row.contact?.id)
-        .filter((contactId): contactId is string => Boolean(contactId)),
-    [contactsQuery.data],
-  );
+  // Mémoïsé sur une CLÉ STRING triée-jointe, pas sur contactsQuery.data ni
+  // sur le tableau lui-même : si le reactor InstantDB republie un résultat
+  // "nouveau" en référence mais identique en contenu (heartbeat, reconnexion),
+  // .data change quand même de référence — un useMemo([...data]) seul ne
+  // suffit donc pas à casser la cascade. Une clé primitive (comparée par
+  // valeur) le fait, quelle que soit l'instabilité en amont. Même chose plus
+  // bas pour visibleOwnerIds et myStatusIds : ce sont les tableaux passés
+  // directement à un `$in` de db.useQuery, donc les seuls qui comptent pour
+  // éviter la resouscription en boucle ("Maximum update depth exceeded").
+  const contactProfileIdsRaw = (contactsQuery.data?.contacts ?? [])
+    .map((row) => row.contact?.id)
+    .filter((contactId): contactId is string => Boolean(contactId));
+  const contactProfileIdsKey = [...contactProfileIdsRaw].sort().join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- clé stable volontaire, voir commentaire ci-dessus
+  const contactProfileIds = useMemo(() => contactProfileIdsRaw, [contactProfileIdsKey]);
 
-  const visibleOwnerIds = useMemo(
-    () => (myProfile ? [myProfile.id, ...contactProfileIds] : []),
-    [myProfile?.id, contactProfileIds],
-  );
+  const visibleOwnerIdsRaw = myProfile ? [myProfile.id, ...contactProfileIds] : [];
+  const visibleOwnerIdsKey = visibleOwnerIdsRaw.slice().sort().join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- clé stable volontaire, voir commentaire ci-dessus
+  const visibleOwnerIds = useMemo(() => visibleOwnerIdsRaw, [visibleOwnerIdsKey]);
   const statusesQuery = db.useQuery(
     myProfile
       ? {
@@ -78,10 +82,10 @@ export default function StatusesScreen() {
     return set;
   }, [myViewsQuery.data]);
 
-  const myStatusIds = useMemo(
-    () => statuses.filter((status) => status.owner?.id === myProfile?.id).map((status) => status.id),
-    [statuses, myProfile?.id],
-  );
+  const myStatusIdsRaw = statuses.filter((status) => status.owner?.id === myProfile?.id).map((status) => status.id);
+  const myStatusIdsKey = myStatusIdsRaw.slice().sort().join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- clé stable volontaire, voir commentaire plus haut
+  const myStatusIds = useMemo(() => myStatusIdsRaw, [myStatusIdsKey]);
   const viewCountsQuery = db.useQuery(
     myStatusIds.length > 0 ? { statusViews: { $: { where: { "status.id": { $in: myStatusIds } } }, status: {} } } : null,
   );

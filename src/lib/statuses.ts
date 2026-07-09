@@ -6,13 +6,14 @@ import { useOwnProfile } from "./profile";
  * Une seule requête groupée pour tous mes statusViews (pas une par statut
  * affiché) — évite le N+1 pour dériver l'ensemble des statuts déjà vus.
  *
- * Chaque tableau dérivé (contactProfileIds, contactStatusIds,
- * viewedStatusIds) est mémoïsé sur la référence de `.data` (stable tant que
- * le serveur n'a pas poussé un nouveau résultat, cf. resultCacheRef dans
- * useQuery.js) — sans ça, un nouveau tableau reconstruit à chaque render
- * (potentiellement dans un ordre différent) change le hash de la query
- * suivante (`$in`) à chaque fois, provoquant une resouscription en boucle
- * et un "Maximum update depth exceeded".
+ * `contactProfileIds` (le tableau passé au `$in` de `statusesQuery`) est
+ * mémoïsé sur une CLÉ STRING triée-jointe, pas sur la référence de
+ * `contactsQuery.data` : si le reactor InstantDB republie un résultat
+ * "nouveau" en référence mais identique en contenu (ex. heartbeat, ping de
+ * reconnexion), `.data` change quand même de référence, ce qui aurait
+ * recassé la mémoïsation en cascade même avec un `useMemo([...data])`.
+ * Une clé primitive (comparée par valeur, pas par référence) casse la
+ * chaîne à cet endroit précis, quelle que soit l'instabilité en amont.
  */
 export function useHasUnseenContactStatuses(): boolean {
   const { profile } = useOwnProfile();
@@ -20,13 +21,12 @@ export function useHasUnseenContactStatuses(): boolean {
   const contactsQuery = db.useQuery(
     profile ? { contacts: { $: { where: { owner: profile.id } }, contact: {} } } : null,
   );
-  const contactProfileIds = useMemo(
-    () =>
-      (contactsQuery.data?.contacts ?? [])
-        .map((row) => row.contact?.id)
-        .filter((id): id is string => Boolean(id)),
-    [contactsQuery.data],
-  );
+  const contactProfileIdsRaw = (contactsQuery.data?.contacts ?? [])
+    .map((row) => row.contact?.id)
+    .filter((id): id is string => Boolean(id));
+  const contactProfileIdsKey = [...contactProfileIdsRaw].sort().join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- clé stable volontaire, voir commentaire ci-dessus
+  const contactProfileIds = useMemo(() => contactProfileIdsRaw, [contactProfileIdsKey]);
 
   const statusesQuery = db.useQuery(
     profile && contactProfileIds.length > 0
