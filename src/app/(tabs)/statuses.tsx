@@ -28,11 +28,22 @@ export default function StatusesScreen() {
   const contactsQuery = db.useQuery(
     myProfile ? { contacts: { $: { where: { owner: myProfile.id } }, contact: {} } } : null,
   );
-  const contactProfileIds = (contactsQuery.data?.contacts ?? [])
-    .map((row) => row.contact?.id)
-    .filter((contactId): contactId is string => Boolean(contactId));
+  // Mémoïsé sur contactsQuery.data (stable tant qu'aucune nouvelle donnée
+  // n'arrive du serveur) — sinon un nouveau tableau reconstruit à chaque
+  // render change le hash de statusesQuery à chaque fois et provoque une
+  // resouscription en boucle ("Maximum update depth exceeded").
+  const contactProfileIds = useMemo(
+    () =>
+      (contactsQuery.data?.contacts ?? [])
+        .map((row) => row.contact?.id)
+        .filter((contactId): contactId is string => Boolean(contactId)),
+    [contactsQuery.data],
+  );
 
-  const visibleOwnerIds = myProfile ? [myProfile.id, ...contactProfileIds] : [];
+  const visibleOwnerIds = useMemo(
+    () => (myProfile ? [myProfile.id, ...contactProfileIds] : []),
+    [myProfile?.id, contactProfileIds],
+  );
   const statusesQuery = db.useQuery(
     myProfile
       ? {
@@ -44,8 +55,12 @@ export default function StatusesScreen() {
       : null,
   );
 
-  const statuses = [...(statusesQuery.data?.statuses ?? [])].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  const statuses = useMemo(
+    () =>
+      [...(statusesQuery.data?.statuses ?? [])].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+    [statusesQuery.data],
   );
   const isLoading = statusesQuery.isLoading || contactsQuery.isLoading;
 
@@ -63,7 +78,10 @@ export default function StatusesScreen() {
     return set;
   }, [myViewsQuery.data]);
 
-  const myStatusIds = statuses.filter((status) => status.owner?.id === myProfile?.id).map((status) => status.id);
+  const myStatusIds = useMemo(
+    () => statuses.filter((status) => status.owner?.id === myProfile?.id).map((status) => status.id),
+    [statuses, myProfile?.id],
+  );
   const viewCountsQuery = db.useQuery(
     myStatusIds.length > 0 ? { statusViews: { $: { where: { "status.id": { $in: myStatusIds } } }, status: {} } } : null,
   );

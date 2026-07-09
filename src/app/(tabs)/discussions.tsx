@@ -1,9 +1,8 @@
-import { useLayoutEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useNavigation, useRouter } from "expo-router";
-import { MessageCircle, Moon, Search, Sun } from "lucide-react-native";
+import { useRouter } from "expo-router";
+import { MessageCircle, Search } from "lucide-react-native";
 import { Avatar, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
-import { DiscussionsHeaderMenu } from "@/components/discussions-header-menu";
 import { db } from "@/lib/db";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
@@ -26,10 +25,9 @@ const CHIPS: Chip[] = [
 ];
 
 export default function DiscussionsScreen() {
-  const { colors, isDark, setColorSchemePreference } = useTheme();
-  const { t, locale, setLocale } = useI18n();
+  const { colors } = useTheme();
+  const { t } = useI18n();
   const router = useRouter();
-  const navigation = useNavigation();
   const { profile, isLoading: isProfileLoading } = useOwnProfile();
   const onlineIds = useOnlineProfileIds();
 
@@ -51,28 +49,6 @@ export default function DiscussionsScreen() {
 
   const conversations = membershipsQuery.data?.memberships ?? [];
   const isLoading = isProfileLoading || membershipsQuery.isLoading;
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerTitle: (props: { allowFontScaling?: boolean }) => (
-        <Text style={{ color: colors.accent, fontSize: 20, fontWeight: "800" }} allowFontScaling={props.allowFontScaling}>
-          {t("app.name")}
-        </Text>
-      ),
-      headerRight: () => (
-        <View className="mr-2 flex-row items-center gap-4">
-          <Pressable onPress={() => setColorSchemePreference(isDark ? "light" : "dark")} hitSlop={8}>
-            {isDark ? <Sun color={colors.text} size={20} /> : <Moon color={colors.text} size={20} />}
-          </Pressable>
-          <Pressable onPress={() => setLocale(locale === "fr" ? "en" : "fr")} hitSlop={8}>
-            <Text style={{ color: colors.text, fontWeight: "700", fontSize: 13 }}>{locale.toUpperCase()}</Text>
-          </Pressable>
-          <DiscussionsHeaderMenu />
-        </View>
-      ),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, locale, colors]);
 
   function handleChipPress(chip: Chip) {
     if (chip.key === "news") {

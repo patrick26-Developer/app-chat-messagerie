@@ -1,13 +1,14 @@
-import { Pressable, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { Tabs, useRouter } from "expo-router";
-import { CircleDot, MessageCircle, Plus, User, Users } from "lucide-react-native";
+import { CircleDot, MessageCircle, Moon, Plus, Sun, User, Users } from "lucide-react-native";
+import { DiscussionsHeaderMenu } from "@/components/discussions-header-menu";
 import { useI18n } from "@/lib/i18n";
 import { useHasUnseenContactStatuses } from "@/lib/statuses";
 import { useTheme } from "@/lib/theme";
 
 export default function TabsLayout() {
-  const { colors } = useTheme();
-  const { t } = useI18n();
+  const { colors, isDark, setColorSchemePreference } = useTheme();
+  const { t, locale, setLocale } = useI18n();
   const router = useRouter();
   const hasUnseenStatuses = useHasUnseenContactStatuses();
 
@@ -27,10 +28,33 @@ export default function TabsLayout() {
         name="discussions"
         options={{
           tabBarLabel: t("tabs.discussions"),
-          // headerTitle/headerRight gérés dynamiquement depuis
-          // discussions.tsx via navigation.setOptions() (recherche +
-          // toggles thème/langue dépendent de son état local).
+          // Config statique ici (pas via navigation.setOptions() depuis
+          // discussions.tsx) : appeler setOptions() dans un useLayoutEffect
+          // depuis un écran d'onglet a provoqué une boucle de re-render
+          // infinie ("Maximum update depth exceeded") avec le navigateur
+          // Tabs. La recherche/les chips vivent dans le corps de l'écran,
+          // pas dans le header, donc rien ici ne dépend de l'état local de
+          // discussions.tsx — une config statique suffit.
+          headerTitle: (props) => (
+            <Text
+              style={{ color: colors.accent, fontSize: 20, fontWeight: "800" }}
+              allowFontScaling={props.allowFontScaling}
+            >
+              {t("app.name")}
+            </Text>
+          ),
           tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
+          headerRight: () => (
+            <View className="mr-2 flex-row items-center gap-4">
+              <Pressable onPress={() => setColorSchemePreference(isDark ? "light" : "dark")} hitSlop={8}>
+                {isDark ? <Sun color={colors.text} size={20} /> : <Moon color={colors.text} size={20} />}
+              </Pressable>
+              <Pressable onPress={() => setLocale(locale === "fr" ? "en" : "fr")} hitSlop={8}>
+                <Text style={{ color: colors.text, fontWeight: "700", fontSize: 13 }}>{locale.toUpperCase()}</Text>
+              </Pressable>
+              <DiscussionsHeaderMenu />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
