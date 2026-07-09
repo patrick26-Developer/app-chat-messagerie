@@ -60,7 +60,7 @@ const _schema = i.schema({
       content: i.string(),
       backgroundColor: i.string().optional(),
       createdAt: i.date(),
-      expiresAt: i.date(),
+      expiresAt: i.date().indexed(),
     }),
     statusViews: i.entity({
       viewedAt: i.date(),

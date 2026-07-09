@@ -37,7 +37,7 @@ export default function StatusesScreen() {
     myProfile
       ? {
           statuses: {
-            $: { where: { "owner.id": { $in: visibleOwnerIds } } },
+            $: { where: { "owner.id": { $in: visibleOwnerIds }, expiresAt: { $gt: new Date() } } },
             owner: {},
           },
         }

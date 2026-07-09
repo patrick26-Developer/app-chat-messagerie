@@ -1,7 +1,6 @@
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Tabs, useRouter } from "expo-router";
 import { CircleDot, MessageCircle, Plus, User, Users } from "lucide-react-native";
-import { DiscussionsHeaderMenu } from "@/components/discussions-header-menu";
 import { useI18n } from "@/lib/i18n";
 import { useHasUnseenContactStatuses } from "@/lib/statuses";
 import { useTheme } from "@/lib/theme";
@@ -28,19 +27,10 @@ export default function TabsLayout() {
         name="discussions"
         options={{
           tabBarLabel: t("tabs.discussions"),
-          // Nom de l'app plutôt que le nom de la section, avec un style
-          // de titre légèrement personnalisé (l'API headerTitle accepte
-          // une fonction, donc pas besoin de sortir du système de header).
-          headerTitle: (props) => (
-            <Text
-              style={{ color: colors.accent, fontSize: 20, fontWeight: "800" }}
-              allowFontScaling={props.allowFontScaling}
-            >
-              {t("app.name")}
-            </Text>
-          ),
+          // headerTitle/headerRight gérés dynamiquement depuis
+          // discussions.tsx via navigation.setOptions() (recherche +
+          // toggles thème/langue dépendent de son état local).
           tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
-          headerRight: () => <DiscussionsHeaderMenu />,
         }}
       />
       <Tabs.Screen
