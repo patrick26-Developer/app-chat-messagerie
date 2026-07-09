@@ -4,8 +4,10 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { Send } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
 import { Avatar, ScreenContainer } from "@/components/ui";
+import { ChatContactMenu } from "@/components/chat-contact-menu";
 import { db } from "@/lib/db";
 import { useI18n } from "@/lib/i18n";
+import { useOnlineProfileIds } from "@/lib/presence";
 import { useOwnProfile } from "@/lib/profile";
 import { useTheme } from "@/lib/theme";
 import type { Message } from "../../../instant.schema";
@@ -20,6 +22,7 @@ export default function ChatScreen() {
   const { chatId: chatIdParam } = useLocalSearchParams<{ chatId: string }>();
   const chatId = Array.isArray(chatIdParam) ? chatIdParam[0] : chatIdParam;
   const { profile: myProfile } = useOwnProfile();
+  const onlineIds = useOnlineProfileIds();
 
   const [text, setText] = useState("");
   const [inputHeight, setInputHeight] = useState(MIN_MESSAGE_INPUT_HEIGHT);
@@ -99,9 +102,20 @@ export default function ChatScreen() {
           headerTitle: () => (
             <View className="flex-row items-center gap-2">
               <Avatar uri={headerAvatarUri} name={headerAvatarName} size={32} />
-              <Text style={{ color: colors.text, fontWeight: "600", fontSize: 16 }}>{headerTitleText}</Text>
+              <View>
+                <Text style={{ color: colors.text, fontWeight: "600", fontSize: 16 }}>{headerTitleText}</Text>
+                {!chat?.isGroup && otherMember ? (
+                  <Text style={{ color: onlineIds.has(otherMember.id) ? colors.accent : colors.textMuted, fontSize: 12 }}>
+                    {onlineIds.has(otherMember.id) ? t("chat.online") : t("chat.offline")}
+                  </Text>
+                ) : null}
+              </View>
             </View>
           ),
+          headerRight:
+            !chat?.isGroup && otherMember && myProfile
+              ? () => <ChatContactMenu myProfileId={myProfile.id} otherProfileId={otherMember.id} />
+              : undefined,
         }}
       />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
