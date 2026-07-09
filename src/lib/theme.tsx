@@ -210,7 +210,7 @@ const palettes: Palettes = {
   twitter: { light: twitterLight, dark: twitterDark },
 };
 
-export const DEFAULT_PALETTE_NAME: PaletteName = "whatsapp";
+export const DEFAULT_PALETTE_NAME: PaletteName = "twitter";
 export const DEFAULT_COLOR_SCHEME_PREFERENCE: ColorSchemePreference = "system";
 
 // Accent scheme-invariant dans nos 6 palettes (même valeur en light/dark) —

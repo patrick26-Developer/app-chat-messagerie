@@ -349,15 +349,59 @@ const rules = {
   // A, voit le statut de A → réussit ; régression : A voit toujours son
   // propre statut. (8) C, sans relation de contact avec A, ne voit pas
   // son statut → bloqué.
+  // Ajout (2026-07-09, "qui a vu mon statut") : créer une ligne `statusViews`
+  // et la lier via `.link({ status: statusId })` touche réciproquement
+  // `statuses.views` (le côté "many" du lien `statusViewsOfStatus`) — même
+  // mécanique que `chats.messages`/`profiles.contacts` documentée ailleurs
+  // dans ce fichier. `statuses.update` (alors `isOwner` seul) bloquait donc
+  // TOUT viewer (pas propriétaire) qui tentait d'enregistrer sa propre vue —
+  // confirmé via `debugTransact` (check `statuses.update` → check-pass?:
+  // false, modified-fields: ["views"]) avant même d'écrire l'écran.
+  //
+  // `isBeingViewed` comble ce trou. PREMIÈRE VERSION REJETÉE après test :
+  // `size(request.modifiedFields) == 1 && 'views' in request.modifiedFields`
+  // SEUL, sans vérifier que l'auteur peut légitimement voir ce statut —
+  // combiné à `statusViews.create = isViewer` (qui ne vérifie PAS non plus
+  // la visibilité du statut visé), ça permettait à N'IMPORTE QUEL
+  // utilisateur authentifié de créer une ligne `statusViews` sur le statut
+  // de n'importe qui, contact ou non. Confirmé : C (sans relation avec le
+  // propriétaire) réussissait la transaction complète. Corrigé en résserrant
+  // `isBeingViewed` à `isOwner || isContact` (même condition que `view`) —
+  // reconfirmé : C bloqué, B (contact légitime) toujours OK.
+  //
+  // Découverte annexe (comportement correct de la plateforme, pas un bug) :
+  // filtrer `statusViews` par un chemin `"status.id"` exige implicitement la
+  // permission de VOIR l'entité `statuses` traversée — quelqu'un sans
+  // `isOwner`/`isContact` sur le statut obtient zéro résultat, même pour SA
+  // PROPRE ligne `statusViews`. Sans impact sur ce projet : le dédoublonnage
+  // et l'écran "Vu par" ne s'exécutent jamais que pour quelqu'un qui a déjà
+  // accès au statut (sinon il ne le verrait pas dans son fil).
+  //
+  // Testé empiriquement avant de pousser : (1) B (contact) enregistre sa vue
+  // → réussit après correction, échouait avant. (2) requête de détection
+  // d'une ligne existante (dédoublonnage applicatif) → fonctionne. (3) le
+  // propriétaire lit toutes les vues avec `viewer: {}` résolu. (4) un simple
+  // viewer ne lit que sa propre ligne, jamais celles des autres. (5) C (sans
+  // relation) bloqué à la création, confirmé après correction.
+  //
+  // Contrairement à `contacts.isAcceptedByReceiver`, `debugTransact` standard
+  // a suffi ici (pas de contournement via de vrais comptes + asUser().transact()
+  // nécessaire) : les binds en jeu (`request.modifiedFields`, et des refs déjà
+  // commitées comme `owner.contacts.contact.$user.id`) ne dépendent jamais de
+  // la résolution d'un lien reverse fraîchement créé DANS la même transaction
+  // simulée — seul ce cas précis échappe à `debugTransact` (cf. section
+  // "Méthodologie de test des permissions" dans CLAUDE.md).
   statuses: {
     bind: {
       isOwner: "auth.id != null && auth.id in data.ref('owner.$user.id')",
       isContact: "auth.id != null && auth.id in data.ref('owner.contacts.contact.$user.id')",
+      isBeingViewed:
+        "auth.id != null && (auth.id in data.ref('owner.$user.id') || auth.id in data.ref('owner.contacts.contact.$user.id')) && size(request.modifiedFields) == 1 && 'views' in request.modifiedFields",
     },
     allow: {
       view: "isOwner || isContact",
       create: "isOwner",
-      update: "isOwner",
+      update: "isOwner || isBeingViewed",
       delete: "isOwner",
     },
   },

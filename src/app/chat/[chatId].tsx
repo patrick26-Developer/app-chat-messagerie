@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Send } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
-import { Avatar, Input, ScreenContainer } from "@/components/ui";
+import { Avatar, ScreenContainer } from "@/components/ui";
 import { db } from "@/lib/db";
 import { useI18n } from "@/lib/i18n";
 import { useOwnProfile } from "@/lib/profile";
 import { useTheme } from "@/lib/theme";
 import type { Message } from "../../../instant.schema";
+
+const MIN_MESSAGE_INPUT_HEIGHT = 44;
+// ~5 lignes avant que le champ ne scroll en interne plutôt que de continuer à grandir.
+const MAX_MESSAGE_INPUT_HEIGHT = 130;
 
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -18,6 +22,7 @@ export default function ChatScreen() {
   const { profile: myProfile } = useOwnProfile();
 
   const [text, setText] = useState("");
+  const [inputHeight, setInputHeight] = useState(MIN_MESSAGE_INPUT_HEIGHT);
   const hasMarkedRead = useRef(false);
 
   const chatQuery = db.useQuery(
@@ -56,6 +61,7 @@ export default function ChatScreen() {
     const trimmedText = text.trim();
     if (!trimmedText || !myProfile || !chatId) return;
     setText("");
+    setInputHeight(MIN_MESSAGE_INPUT_HEIGHT);
     const now = new Date().toISOString();
     await db.transact([
       db.tx.messages[id()]
@@ -116,7 +122,26 @@ export default function ChatScreen() {
           className="flex-row items-center gap-2 border-t px-3 py-2"
           style={{ borderTopColor: colors.border, backgroundColor: colors.surface }}
         >
-          <Input value={text} onChangeText={setText} placeholder={t("chat.messagePlaceholder")} containerClassName="flex-1" />
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            placeholder={t("chat.messagePlaceholder")}
+            placeholderTextColor={colors.placeholder}
+            multiline
+            blurOnSubmit={false}
+            onContentSizeChange={(event) => {
+              const nextHeight = event.nativeEvent.contentSize.height;
+              setInputHeight(Math.min(Math.max(nextHeight, MIN_MESSAGE_INPUT_HEIGHT), MAX_MESSAGE_INPUT_HEIGHT));
+            }}
+            className="flex-1 rounded-lg border px-4 py-3 text-base"
+            style={{
+              backgroundColor: colors.inputBackground,
+              color: colors.text,
+              borderColor: colors.border,
+              height: inputHeight,
+              maxHeight: MAX_MESSAGE_INPUT_HEIGHT,
+            }}
+          />
           <Pressable onPress={handleSend} hitSlop={8}>
             <Send color={colors.accent} size={22} />
           </Pressable>
