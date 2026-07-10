@@ -48,11 +48,19 @@ export default function StatusesScreen() {
   const visibleOwnerIdsKey = visibleOwnerIdsRaw.slice().sort().join(",");
   // eslint-disable-next-line react-hooks/exhaustive-deps -- clé stable volontaire, voir commentaire ci-dessus
   const visibleOwnerIds = useMemo(() => visibleOwnerIdsRaw, [visibleOwnerIdsKey]);
+  // `new Date()` calculé une seule fois par montage, PAS inline dans la query
+  // : weakHash() convertit un Date via .toJSON() (son ISO string), qui change
+  // à chaque milliseconde — un `new Date()` recréé à chaque render change
+  // donc le hash de la query à chaque render, ce qui resouscrit en boucle
+  // (subscribe() rappelle cb() de façon synchrone à chaque (re)abonnement) et
+  // cause le "Maximum update depth exceeded", indépendamment de la stabilité
+  // des tableaux passés en $in.
+  const notExpiredAfter = useMemo(() => new Date(), []);
   const statusesQuery = db.useQuery(
     myProfile
       ? {
           statuses: {
-            $: { where: { "owner.id": { $in: visibleOwnerIds }, expiresAt: { $gt: new Date() } } },
+            $: { where: { "owner.id": { $in: visibleOwnerIds }, expiresAt: { $gt: notExpiredAfter } } },
             owner: {},
           },
         }

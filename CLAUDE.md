@@ -139,3 +139,22 @@ anglais, basé à Brazzaville.
   (pas de base64, pas d'URI `data:`, pas de `fetch()`). Tout futur upload
   de fichier dans l'app (ex. photo de statut, si ajoutée un jour) doit
   suivre ce chemin direct.
+
+- **Ne jamais passer une valeur non stable (ex. `new Date()`, un
+  objet/tableau littéral recréé à chaque render) directement dans l'objet
+  `where` d'un `db.useQuery()`.** InstantDB hash la query (`weakHash()`)
+  pour détecter les changements et décider s'il faut resouscrire ; une
+  valeur qui change à chaque render (comme `new Date()` à la précision
+  milliseconde — converti via `.toJSON()` dans le hash) fait resouscrire
+  en boucle infinie, avec `subscribe()` qui rappelle `cb()` de façon
+  synchrone à chaque (re)abonnement → **"Maximum update depth exceeded"**.
+  Confirmé empiriquement (2026-07-10) sur `statuses.tsx` : `expiresAt: {
+  $gt: new Date() }` inline dans la query causait ce crash sur Android,
+  indépendamment de la stabilité des tableaux `$in` par ailleurs bien
+  mémoïsés. Toujours mémoïser ces valeurs avec `useMemo` — dépendance
+  vide `[]` pour une valeur figée au montage (ex. `useMemo(() => new
+  Date(), [])`), ou une clé stable dérivée (ex. `[...tableau].sort().join(",")`
+  comme dépendance, pas le tableau lui-même) pour les tableaux/objets qui
+  dépendent de données live, puisqu'un `useMemo([...data])` seul ne suffit
+  pas si `.data` peut changer de référence sans changement de contenu
+  (heartbeat, reconnexion).
