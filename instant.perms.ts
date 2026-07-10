@@ -232,14 +232,73 @@ const rules = {
   // lier un message appartenant à un AUTRE chat vers celui-ci → échoue
   // (bloqué par `messages.update = isSender`, qui reste inchangé) ; (3) un
   // non-membre du chat → toujours bloqué par `isMember`.
+  // Ajout (2026-07-10, ajout de membres à un groupe/communauté existant) :
+  // `update` restait bloqué sur le champ `memberships` pour tout chat déjà
+  // créé (protection délibérée, cf. commentaire au-dessus qui documente la
+  // faille `isAdmin` originale). `isAdmin` reprend cette idée mais évite
+  // cette fois la corrélation `data.ref()` sur la collection to-many
+  // `memberships` (qui avait échoué : n'importe quel membre passait dès
+  // qu'UN admin existait dans le groupe) — `adminUserIds` est un champ
+  // dénormalisé DIRECTEMENT sur la ligne `chats` (JSON list de `$user.id`,
+  // maintenu par l'app à la création, cf. new-group.tsx/new-community.tsx),
+  // donc `auth.id in data.adminUserIds` est un test simple sur la ligne
+  // courante, sans corrélation.
+  //
+  // Validé de façon isolée AVANT d'écrire cette règle, via un script
+  // `debugTransact` avec des règles overridées (donc sans jamais toucher
+  // aux vraies règles ni aux vraies données avant confirmation) : (1)
+  // `i.json<string[]>()` est accepté par InstantDB (attribut créé côté
+  // serveur, confirmé via `instant-cli push schema`) ; (2) `auth.id in
+  // data.adminUserIds` renvoie bien `check-pass?: true` pour un compte
+  // dont l'id figure dans le tableau, et `check-pass?: false` sinon —
+  // jamais testé avant ce tour-ci (le seul `in` déjà validé dans ce
+  // fichier portait sur des listes produites par `data.ref()`, pas sur un
+  // champ `i.json` littéral).
+  //
+  // Backfill nécessaire et exécuté séparément (scripts/backfill-admin-user-ids.mjs)
+  // pour les groupes/communautés créés avant l'introduction de ce champ —
+  // sans ça, ils resteraient bloqués indéfiniment (aucun admin identifiable).
+  //
+  // `update` autorise maintenant une DEUXIÈME branche, disjointe de la
+  // première : uniquement le champ `memberships`, et seulement si `isAdmin`.
+  // Une communauté suit exactement la même règle qu'un groupe classique
+  // ici (décision : pas de politique "n'importe quel membre peut inviter"
+  // pour l'instant — un seul mécanisme à tester, un seul point de vérité ;
+  // `adminUserIds` étant une liste, rien n'empêche d'assouplir spécifiquement
+  // les communautés plus tard sans retoucher le schéma).
+  //
+  // Testé empiriquement avant de pousser (voir résultats donnés à
+  // l'utilisateur, tests 1 à 7) : (1) `isAdmin` seul, réévalué sur des
+  // vraies lignes `chats` (pas seulement le script isolé ci-dessus). (2)
+  // membre non-admin d'un groupe tente d'ajouter quelqu'un → échoue. (3)
+  // admin d'un groupe ajoute un membre → réussit. (4) envoi de message
+  // normal dans un groupe (branche `lastMessageAt`/`lastMessagePreview`/
+  // `messages` inchangée) → toujours OK. (5) chat 1-to-1, tentative d'ajout
+  // d'un 3ᵉ membre → toujours bloqué (`adminUserIds` absent/vide → `isAdmin`
+  // faux). (6) inconnu (non-membre) tente de s'ajouter lui-même à un groupe
+  // → toujours bloqué. (7) admin d'une communauté ajoute un membre → réussit ;
+  // membre non-admin d'une communauté → échoue (même politique que les
+  // groupes, cf. décision ci-dessus).
   chats: {
     bind: {
       isMember: "auth.id != null && auth.id in data.ref('memberships.profile.$user.id')",
+      // `data.adminUserIds != null` est OBLIGATOIRE, pas une précaution en
+      // trop : `auth.id in data.adminUserIds` seul CRASHE (erreur
+      // d'évaluation CEL "No matching overload for function '@in'"), pas
+      // juste `false`, dès que `adminUserIds` est absent — le cas de TOUS
+      // les chats 1-to-1 (jamais censés en avoir) et de tout chat de
+      // groupe non encore backfillé. Sans cette garde, la branche
+      // `isAdmin` de `chats.update` fait échouer toute la requête HTTP
+      // (400) au lieu d'un simple refus de permission, pour ce cas précis.
+      // Confirmé empiriquement (voir résultats donnés à l'utilisateur,
+      // test 5) avant correction.
+      isAdmin: "auth.id != null && data.adminUserIds != null && auth.id in data.adminUserIds",
     },
     allow: {
       view: "isMember",
       create: "isMember",
-      update: "isMember && request.modifiedFields.all(f, f in ['lastMessageAt', 'lastMessagePreview', 'messages'])",
+      update:
+        "isMember && (request.modifiedFields.all(f, f in ['lastMessageAt', 'lastMessagePreview', 'messages']) || (isAdmin && request.modifiedFields.all(f, f in ['memberships'])))",
       delete: "false",
     },
   },
@@ -296,6 +355,18 @@ const rules = {
   // d'ajouter quelqu'un plus tard → échoue aussi ; (4) régression 1-to-1
   // toujours fonctionnelle ; (6) envoi de message dans un chat de groupe
   // (pas seulement 1-to-1) → réussit, jamais testé avant ce tour-ci.
+  // Ajout (2026-07-10, ajout de membres à un groupe/communauté existant) :
+  // AUCUN changement nécessaire ici. `isGroupCoCreation` ("auth est déjà
+  // membre du chat visé ET ce chat est un groupe") ne s'est jamais limitée
+  // à la création malgré son nom — `data.ref('chat.memberships...')`
+  // traverse l'état réellement commité du graphe (pré-existant + ce que
+  // cette transaction établit), exactement comme `isMemberOfChat` le fait
+  // déjà pour `view` sur des chats bien établis en prod. Le commentaire
+  // original au-dessus du bloc `chats` l'anticipait déjà explicitement :
+  // "la protection 'pas d'ajout a posteriori' ne vient de toute façon PAS
+  // de ce bind, elle vient de chats.update". Broadir `chats.update` (voir
+  // ci-dessus) suffit donc à débloquer l'ajout de membres — ajouter ici un
+  // second bind identique en substance aurait été une duplication inutile.
   memberships: {
     bind: {
       isOwnMembership: "auth.id != null && auth.id in data.ref('profile.$user.id')",
