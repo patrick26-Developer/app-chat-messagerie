@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { Send } from "lucide-react-native";
+import { Send, X } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
 import { Avatar, ScreenContainer } from "@/components/ui";
 import { ChatContactMenu } from "@/components/chat-contact-menu";
@@ -28,6 +28,7 @@ export default function ChatScreen() {
 
   const [text, setText] = useState("");
   const [inputHeight, setInputHeight] = useState(MIN_MESSAGE_INPUT_HEIGHT);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const hasMarkedRead = useRef(false);
 
   const chatQuery = db.useQuery(
@@ -65,6 +66,16 @@ export default function ChatScreen() {
   async function handleSend() {
     const trimmedText = text.trim();
     if (!trimmedText || !myProfile || !chatId) return;
+
+    if (editingMessageId) {
+      const messageId = editingMessageId;
+      setText("");
+      setInputHeight(MIN_MESSAGE_INPUT_HEIGHT);
+      setEditingMessageId(null);
+      await db.transact(db.tx.messages[messageId].update({ text: trimmedText, editedAt: new Date().toISOString() }));
+      return;
+    }
+
     setText("");
     setInputHeight(MIN_MESSAGE_INPUT_HEIGHT);
     const now = new Date().toISOString();
@@ -73,6 +84,24 @@ export default function ChatScreen() {
         .update({ text: trimmedText, type: "text", createdAt: now })
         .link({ chat: chatId, sender: myProfile.id }),
       db.tx.chats[chatId].update({ lastMessageAt: now, lastMessagePreview: trimmedText }),
+    ]);
+  }
+
+  function startEditingMessage(message: { id: string; text: string }) {
+    setEditingMessageId(message.id);
+    setText(message.text);
+  }
+
+  function cancelEditingMessage() {
+    setEditingMessageId(null);
+    setText("");
+    setInputHeight(MIN_MESSAGE_INPUT_HEIGHT);
+  }
+
+  function handleLongPressMessage(message: { id: string; text: string }) {
+    Alert.alert("", undefined, [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("chat.menu.edit"), onPress: () => startEditingMessage(message) },
     ]);
   }
 
@@ -100,7 +129,7 @@ export default function ChatScreen() {
     // `bubbleMine` par construction, contrairement à `colors.accent`.
     const nameColor = isMine ? textColor : colors.accent;
 
-    const bubble = (
+    const bubbleContent = (
       <View className="max-w-[80%] rounded-2xl px-4 py-2" style={{ backgroundColor: bubbleColor }}>
         {showSenderInfo ? (
           <Pressable onPress={() => goToSenderProfile(item.sender?.id)} hitSlop={4}>
@@ -112,10 +141,28 @@ export default function ChatScreen() {
         <Text selectable style={{ color: textColor }}>
           {item.text}
         </Text>
-        <Text className="mt-1 text-right text-[10px]" style={{ color: textColor, opacity: 0.7 }}>
-          {time}
-        </Text>
+        <View className="mt-1 flex-row items-center justify-end gap-1">
+          {item.editedAt ? (
+            // `textColor` (pas `colors.textMuted`) + opacité réduite : même
+            // technique que l'heure juste à côté, pour garantir le contraste
+            // avec le fond de LA bulle plutôt qu'une couleur pensée pour
+            // le fond de l'écran (cf. le piège déjà rencontré avec
+            // `colors.accent` sur `bubbleMine`).
+            <Text className="text-[10px]" style={{ color: textColor, opacity: 0.6 }}>
+              {t("chat.edited")}
+            </Text>
+          ) : null}
+          <Text className="text-[10px]" style={{ color: textColor, opacity: 0.7 }}>
+            {time}
+          </Text>
+        </View>
       </View>
+    );
+
+    const bubble = isMine ? (
+      <Pressable onLongPress={() => handleLongPressMessage(item)}>{bubbleContent}</Pressable>
+    ) : (
+      bubbleContent
     );
 
     if (!chat?.isGroup) {
@@ -182,6 +229,19 @@ export default function ChatScreen() {
             contentContainerStyle={{ paddingVertical: 8 }}
           />
         )}
+        {editingMessageId ? (
+          <View
+            className="flex-row items-center justify-between border-t px-3 py-1"
+            style={{ borderTopColor: colors.border, backgroundColor: colors.surface }}
+          >
+            <Text className="text-xs" style={{ color: colors.textSecondary }}>
+              {t("chat.editingMessage")}
+            </Text>
+            <Pressable onPress={cancelEditingMessage} hitSlop={8}>
+              <X color={colors.textMuted} size={16} />
+            </Pressable>
+          </View>
+        ) : null}
         <View
           className="flex-row items-center gap-2 border-t px-3 py-2"
           style={{ borderTopColor: colors.border, backgroundColor: colors.surface }}
