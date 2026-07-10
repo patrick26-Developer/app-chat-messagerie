@@ -42,6 +42,15 @@ const _schema = i.schema({
       createdAt: i.date(),
       lastMessageAt: i.date(),
       lastMessagePreview: i.string(),
+      // Dénormalisé depuis memberships.role (maintenu par l'app, jamais lu
+      // depuis memberships côté permissions) : contient des $user.id (pas
+      // des profile.id), pour que la règle `chats.isAdmin` reste un test
+      // simple sur cette ligne (`auth.id in data.adminUserIds`), sans
+      // corrélation data.ref() sur la collection to-many `memberships` —
+      // cf. faille isAdmin documentée dans instant.perms.ts. Optionnel :
+      // les chats créés avant l'introduction de ce champ sont backfillés
+      // séparément (cf. scripts/backfill-admin-user-ids.ts).
+      adminUserIds: i.json<string[]>().optional(),
     }),
     memberships: i.entity({
       role: i.string<MembershipRole>(),
