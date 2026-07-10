@@ -91,14 +91,20 @@ export default function ChatScreen() {
     // messages[index + 1], pas messages[index - 1]. On affiche
     // avatar/nom sur le premier message de chaque série (en lecture
     // haut-vers-bas), donc quand le voisin du dessus n'existe pas ou a un
-    // expéditeur différent.
-    const showSenderInfo = Boolean(chat?.isGroup) && !isMine && messages[index + 1]?.sender?.id !== item.sender?.id;
+    // expéditeur différent — y compris pour mes propres messages.
+    const showSenderInfo = Boolean(chat?.isGroup) && messages[index + 1]?.sender?.id !== item.sender?.id;
+    // `colors.accent` sur mes propres bulles serait invisible : dans les
+    // palettes Instagram/Twitter, `bubbleMine` EST `colors.accent` (même
+    // valeur), donc un texte accent sur fond accent. `bubbleMineText`
+    // (déjà utilisé pour le corps du message) contraste toujours avec
+    // `bubbleMine` par construction, contrairement à `colors.accent`.
+    const nameColor = isMine ? textColor : colors.accent;
 
     const bubble = (
       <View className="max-w-[80%] rounded-2xl px-4 py-2" style={{ backgroundColor: bubbleColor }}>
         {showSenderInfo ? (
           <Pressable onPress={() => goToSenderProfile(item.sender?.id)} hitSlop={4}>
-            <Text className="mb-1 text-xs font-semibold" style={{ color: colors.accent }}>
+            <Text className="mb-1 text-xs font-semibold" style={{ color: nameColor }}>
               {item.sender?.displayName ?? ""}
             </Text>
           </Pressable>
@@ -110,23 +116,25 @@ export default function ChatScreen() {
       </View>
     );
 
-    if (!chat?.isGroup || isMine) {
+    if (!chat?.isGroup) {
       return <View className={`px-4 py-1 ${isMine ? "items-end" : "items-start"}`}>{bubble}</View>;
     }
 
+    const avatarOrSpacer = showSenderInfo ? (
+      <Pressable onPress={() => goToSenderProfile(item.sender?.id)} hitSlop={4}>
+        <Avatar uri={item.sender?.avatarUrl} name={item.sender?.displayName} size={GROUP_MESSAGE_AVATAR_SIZE} />
+      </Pressable>
+    ) : (
+      // Espace réservé invisible : garde le bord de la bulle (gauche pour
+      // les autres, droite pour moi) des bulles suivantes de la même série
+      // aligné avec celle qui porte l'avatar, au lieu de les décaler.
+      <View style={{ width: GROUP_MESSAGE_AVATAR_SIZE }} />
+    );
+
     return (
-      <View className="flex-row items-end gap-2 px-4 py-1">
-        {showSenderInfo ? (
-          <Pressable onPress={() => goToSenderProfile(item.sender?.id)} hitSlop={4}>
-            <Avatar uri={item.sender?.avatarUrl} name={item.sender?.displayName} size={GROUP_MESSAGE_AVATAR_SIZE} />
-          </Pressable>
-        ) : (
-          // Espace réservé invisible : garde le bord gauche des bulles
-          // suivantes de la même série aligné avec celles qui portent
-          // l'avatar, au lieu de les décaler vers la gauche.
-          <View style={{ width: GROUP_MESSAGE_AVATAR_SIZE }} />
-        )}
-        {bubble}
+      <View className={`flex-row items-end gap-2 px-4 py-1 ${isMine ? "justify-end" : "justify-start"}`}>
+        {isMine ? bubble : avatarOrSpacer}
+        {isMine ? avatarOrSpacer : bubble}
       </View>
     );
   }
