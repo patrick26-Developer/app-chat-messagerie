@@ -109,7 +109,9 @@ export default function ChatScreen() {
             </Text>
           </Pressable>
         ) : null}
-        <Text style={{ color: textColor }}>{item.text}</Text>
+        <Text selectable style={{ color: textColor }}>
+          {item.text}
+        </Text>
         <Text className="mt-1 text-right text-[10px]" style={{ color: textColor, opacity: 0.7 }}>
           {time}
         </Text>
