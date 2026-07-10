@@ -89,9 +89,71 @@ anglais, basé à Brazzaville.
 - [X] Navigation par onglets (fait : Discussions/Statuts/Communautés/Profil)
 - [X] UI primitifs réutilisables dans src/components/ui/ (Button, Input,
       Avatar, ListItem, EmptyState, Badge, ScreenContainer)
-- [ ] Écrans métier restants : chat individuel, statuts, communautés,
-      demandes d'amis (Discussions n'a pour l'instant que la liste, pas
-      l'écran de conversation ; Profil est basique)
+- [X] Chat individuel 1-to-1 (src/app/chat/[chatId].tsx) : envoi/réception
+      temps réel, header enrichi (avatar + statut en ligne/hors ligne via
+      présence), menu contact (voir profil / retirer contact / bloquer et
+      partager en stub "bientôt disponible")
+- [X] Groupes : création avec sélection multiple de membres
+      (new-group.tsx) ; ajout de membres après coup réservé à l'admin
+      (group-details.tsx liste les membres avec badge, add-group-member.tsx
+      pour l'ajout) — mécanisme : `chats.adminUserIds` (JSON list de
+      `$user.id`, dénormalisé depuis `memberships.role`, écrit par l'app à
+      la création) permet à `chats.isAdmin` un test simple sur la ligne
+      `chats` courante, sans la corrélation `data.ref()` sur `memberships`
+      qui avait échoué à l'origine (cf. `instant.perms.ts`) ; validé par 9
+      vérifications empiriques (admin/non-admin/inconnu, groupe/communauté/
+      1-to-1) avant mise en prod, 2026-07-10
+- [X] Communautés : création (new-community.tsx, isCommunity: true) +
+      onglet dédié (communities.tsx) ; ajout de membres après coup par
+      l'admin possible (même mécanisme que les groupes) — pas de flux
+      "rejoindre" en libre-service (limitation connue, cf. section dédiée
+      ci-dessous : un inconnu ne peut toujours pas se joindre lui-même)
+- [X] Demandes d'amis (friend-requests.tsx, select-contact.tsx) :
+      envoi/acceptation/refus, réouverture d'une demande refusée par
+      l'expéditeur d'origine uniquement (limitation connue)
+- [X] Contacts (entité dédiée, lignes symétriques créées à l'acceptation
+      d'une demande) : liste dans select-contact.tsx, retrait depuis le
+      menu contact du chat
+- [X] Statuts éphémères (24h) avec vues : publication (publish-status.tsx),
+      fil filtré aux contacts (statuses.tsx), compteur + écran "Vu par"
+      (status-viewers.tsx)
+- [X] Profil enrichi : photo (upload avatar via expo-file-system File +
+      InstantDB Storage), bio, téléphone, nom affiché (edit-profile.tsx) —
+      l'écran Profil principal (profile.tsx) reste volontairement minimal
+      (aperçu + boutons Modifier/Déconnexion), toute la richesse est dans
+      l'écran d'édition
+- [X] Recherche + filtres (chips) sur Discussions (discussions.tsx) : tout/
+      non lus/groupes/communautés + raccourci vers Actualités
+- [X] Paramètres (settings.tsx) : thème clair/sombre/système, palette,
+      langue FR/EN
+- [ ] Actualités ("News") : route/i18n/chip existent, écran = stub vide
+      (news.tsx n'affiche qu'un EmptyState, aucun contenu réel)
+- [ ] Blocage de contact, partage de contact : entrées de menu présentes
+      (chat-contact-menu.tsx) mais non implémentées (Alert "bientôt
+      disponible")
+- [ ] Édition/suppression de message : champs `editedAt`/`deletedAt`
+      déclarés dans le schéma (`messages`) mais aucune UI ne les utilise
+- [ ] Notifications : rien de commencé (aucun schéma, aucune lib, aucun
+      token push)
+
+## Limitations connues (contraintes de permissions, pas de simples écrans manquants)
+
+- **"Rejoindre" un groupe/une communauté en libre-service n'existe pas.**
+  Résolu côté "un admin ajoute quelqu'un" (cf. checklist ci-dessus,
+  `chats.adminUserIds`), mais aucun chemin ne permet à un inconnu de
+  s'ajouter lui-même : `memberships.create` reste conditionné à être déjà
+  membre du chat visé (`isGroupCoCreation`/`isOwnMembership`), ce qu'un
+  inconnu n'est par définition pas. Le bouton "Nouvelle communauté" dans
+  select-contact.tsx est un stub ("bientôt disponible") ; la seule création
+  réelle passe par l'onglet Communautés → new-community.tsx. Piste pour un
+  futur "rejoindre" en libre-service : un nouveau bind conditionné à un
+  futur statut "public" sur `chats`, distinct de `isAdmin`.
+- **Une demande d'ami refusée ne peut être rouverte que par l'expéditeur
+  d'origine.** `isSenderReopeningDeclined` (instant.perms.ts, bloc
+  `friendRequests`) ne couvre que ce sens. Si c'est le destinataire qui
+  change d'avis après avoir refusé, aucun chemin n'existe pour initier une
+  nouvelle demande dans l'autre sens sans reproduire le problème de lien
+  réciproque déjà documenté pour `profiles`/`memberships`.
 
 ## Sécurité — décisions connues
 
@@ -158,3 +220,26 @@ anglais, basé à Brazzaville.
   dépendent de données live, puisqu'un `useMemo([...data])` seul ne suffit
   pas si `.data` peut changer de référence sans changement de contenu
   (heartbeat, reconnexion).
+
+- **Champ dénormalisé `i.json<T>()` + test `in` en permission : garder une
+  garde explicite contre le champ absent.** `auth.id in data.someJsonField`
+  ne s'évalue PAS silencieusement à `false` quand `someJsonField` est
+  `undefined` (cas normal d'un champ `.optional()` jamais renseigné, ex.
+  `chats.adminUserIds` sur un chat 1-to-1 ou un groupe pas encore
+  backfillé) — ça fait carrément échouer toute la requête HTTP avec une
+  erreur d'évaluation CEL ("No matching overload for function '@in'"),
+  confirmé empiriquement le 2026-07-10 en construisant `chats.isAdmin`.
+  Toujours écrire `data.champJson != null && auth.id in data.champJson`,
+  jamais le test `in` seul, dès qu'un champ `i.json` est `.optional()`.
+
+- **SDK admin (`@instantdb/admin`) : les liens to-one ne sont PAS dépliés
+  en objet unique**, contrairement au SDK client (`db.useQuery()` côté
+  React Native, typé via `InstaQLEntity` qui aplatit un lien "has one" en
+  objet direct). Un script Node utilisant `db.query()` de `@instantdb/admin`
+  reçoit `profile`/`$user`/etc. sous forme de **tableau** (`[{...}]`) même
+  pour une relation to-one du schéma — confirmé empiriquement le
+  2026-07-10 en écrivant `scripts/backfill-admin-user-ids.mjs` (bug
+  silencieux au premier essai : `membership.profile?.$user?.id` renvoyait
+  toujours `undefined`, la bonne forme étant `membership.profile?.[0]?.$user?.[0]?.id`).
+  Tout futur script admin (migration, backfill) qui traverse un lien
+  imbriqué doit s'attendre à cette forme, pas à celle du SDK client.
