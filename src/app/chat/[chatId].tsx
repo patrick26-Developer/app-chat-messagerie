@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Send } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
 import { Avatar, ScreenContainer } from "@/components/ui";
@@ -11,17 +11,18 @@ import { useI18n } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
 import { useOwnProfile } from "@/lib/profile";
 import { useTheme } from "@/lib/theme";
-import type { Message } from "../../../instant.schema";
 
 const MIN_MESSAGE_INPUT_HEIGHT = 44;
 // ~5 lignes avant que le champ ne scroll en interne plutôt que de continuer à grandir.
 const MAX_MESSAGE_INPUT_HEIGHT = 130;
+const GROUP_MESSAGE_AVATAR_SIZE = 28;
 
 export default function ChatScreen() {
   const { colors } = useTheme();
   const { t } = useI18n();
   const { chatId: chatIdParam } = useLocalSearchParams<{ chatId: string }>();
   const chatId = Array.isArray(chatIdParam) ? chatIdParam[0] : chatIdParam;
+  const router = useRouter();
   const { profile: myProfile } = useOwnProfile();
   const onlineIds = useOnlineProfileIds();
 
@@ -75,20 +76,57 @@ export default function ChatScreen() {
     ]);
   }
 
-  function renderMessage({ item }: { item: Message & { sender?: { id: string } } }) {
+  function goToSenderProfile(senderId: string | undefined) {
+    if (senderId) router.push({ pathname: "/contact-details", params: { profileId: senderId } });
+  }
+
+  function renderMessage({ item, index }: { item: (typeof messages)[number]; index: number }) {
     const isMine = item.sender?.id === myProfile?.id;
     const time = new Date(item.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     const bubbleColor = isMine ? colors.bubbleMine : colors.bubbleOther;
     const textColor = isMine ? colors.bubbleMineText : colors.bubbleOtherText;
 
+    // `messages` est trié du plus récent au plus ancien et la FlatList est
+    // `inverted` : le message visuellement AU-DESSUS de item est donc
+    // messages[index + 1], pas messages[index - 1]. On affiche
+    // avatar/nom sur le premier message de chaque série (en lecture
+    // haut-vers-bas), donc quand le voisin du dessus n'existe pas ou a un
+    // expéditeur différent.
+    const showSenderInfo = Boolean(chat?.isGroup) && !isMine && messages[index + 1]?.sender?.id !== item.sender?.id;
+
+    const bubble = (
+      <View className="max-w-[80%] rounded-2xl px-4 py-2" style={{ backgroundColor: bubbleColor }}>
+        {showSenderInfo ? (
+          <Pressable onPress={() => goToSenderProfile(item.sender?.id)} hitSlop={4}>
+            <Text className="mb-1 text-xs font-semibold" style={{ color: colors.accent }}>
+              {item.sender?.displayName ?? ""}
+            </Text>
+          </Pressable>
+        ) : null}
+        <Text style={{ color: textColor }}>{item.text}</Text>
+        <Text className="mt-1 text-right text-[10px]" style={{ color: textColor, opacity: 0.7 }}>
+          {time}
+        </Text>
+      </View>
+    );
+
+    if (!chat?.isGroup || isMine) {
+      return <View className={`px-4 py-1 ${isMine ? "items-end" : "items-start"}`}>{bubble}</View>;
+    }
+
     return (
-      <View className={`px-4 py-1 ${isMine ? "items-end" : "items-start"}`}>
-        <View className="max-w-[80%] rounded-2xl px-4 py-2" style={{ backgroundColor: bubbleColor }}>
-          <Text style={{ color: textColor }}>{item.text}</Text>
-          <Text className="mt-1 text-right text-[10px]" style={{ color: textColor, opacity: 0.7 }}>
-            {time}
-          </Text>
-        </View>
+      <View className="flex-row items-end gap-2 px-4 py-1">
+        {showSenderInfo ? (
+          <Pressable onPress={() => goToSenderProfile(item.sender?.id)} hitSlop={4}>
+            <Avatar uri={item.sender?.avatarUrl} name={item.sender?.displayName} size={GROUP_MESSAGE_AVATAR_SIZE} />
+          </Pressable>
+        ) : (
+          // Espace réservé invisible : garde le bord gauche des bulles
+          // suivantes de la même série aligné avec celles qui portent
+          // l'avatar, au lieu de les décaler vers la gauche.
+          <View style={{ width: GROUP_MESSAGE_AVATAR_SIZE }} />
+        )}
+        {bubble}
       </View>
     );
   }
