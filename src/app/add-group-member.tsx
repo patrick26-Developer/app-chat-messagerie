@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ScrollView, Text } from "react-native";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Check } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
 import { Avatar, Button, EmptyState, Input, ListItem, ScreenContainer } from "@/components/ui";
@@ -10,20 +10,20 @@ import { useOwnProfile } from "@/lib/profile";
 import { useTheme } from "@/lib/theme";
 import type { Profile } from "../../instant.schema";
 
-export default function NewCommunityScreen() {
+export default function AddGroupMemberScreen() {
   const { colors } = useTheme();
   const { t } = useI18n();
   const router = useRouter();
+  const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const { profile: myProfile } = useOwnProfile();
-  const auth = db.useAuth();
 
   const [query, setQuery] = useState("");
-  const [communityName, setCommunityName] = useState("");
-  const [description, setDescription] = useState("");
   const [selected, setSelected] = useState<Profile[]>([]);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
   const trimmedQuery = query.trim();
-  const trimmedName = communityName.trim();
+
+  const chatQuery = db.useQuery(chatId ? { chats: { $: { where: { id: chatId } }, memberships: { profile: {} } } } : null);
+  const existingMemberIds = new Set((chatQuery.data?.chats[0]?.memberships ?? []).map((m) => m.profile?.id).filter(Boolean));
 
   const searchQuery = db.useQuery(
     myProfile && trimmedQuery.length > 0
@@ -39,7 +39,7 @@ export default function NewCommunityScreen() {
         }
       : null,
   );
-  const results = searchQuery.data?.profiles ?? [];
+  const results = (searchQuery.data?.profiles ?? []).filter((profile) => !existingMemberIds.has(profile.id));
 
   function toggleSelected(profile: Profile) {
     setSelected((current) =>
@@ -47,41 +47,23 @@ export default function NewCommunityScreen() {
     );
   }
 
-  const canCreate = trimmedName.length > 0 && !isCreating && Boolean(auth.user);
+  const canAdd = Boolean(chatId) && selected.length > 0 && !isAdding;
 
-  async function handleCreate() {
-    if (!myProfile || !auth.user || !canCreate) return;
-    setIsCreating(true);
+  async function handleAdd() {
+    if (!chatId || !canAdd) return;
+    setIsAdding(true);
     try {
-      const chatId = id();
       const now = new Date().toISOString();
-
-      await db.transact([
-        db.tx.chats[chatId].update({
-          isGroup: true,
-          isCommunity: true,
-          name: trimmedName,
-          description: description.trim() || undefined,
-          createdAt: now,
-          lastMessageAt: now,
-          lastMessagePreview: "",
-          // $user.id (pas profile.id) : chats.isAdmin compare directement à
-          // auth.id, cf. instant.perms.ts.
-          adminUserIds: [auth.user.id],
-        }),
-        db.tx.memberships[id()]
-          .update({ role: "admin", joinedAt: now, lastReadAt: now, muted: false })
-          .link({ chat: chatId, profile: myProfile.id }),
-        ...selected.map((profile) =>
+      await db.transact(
+        selected.map((profile) =>
           db.tx.memberships[id()]
             .update({ role: "member", joinedAt: now, lastReadAt: now, muted: false })
             .link({ chat: chatId, profile: profile.id }),
         ),
-      ]);
-
-      router.replace({ pathname: "/chat/[chatId]", params: { chatId } });
+      );
+      router.back();
     } finally {
-      setIsCreating(false);
+      setIsAdding(false);
     }
   }
 
@@ -91,23 +73,10 @@ export default function NewCommunityScreen() {
         options={{
           headerShown: true,
           presentation: "modal",
-          headerTitle: t("newCommunity.title"),
+          headerTitle: t("addGroupMember.title"),
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.text,
         }}
-      />
-      <Input
-        value={communityName}
-        onChangeText={setCommunityName}
-        placeholder={t("newCommunity.namePlaceholder")}
-        containerClassName="mb-2"
-      />
-      <Input
-        value={description}
-        onChangeText={setDescription}
-        placeholder={t("newCommunity.descriptionPlaceholder")}
-        multiline
-        containerClassName="mb-2"
       />
       <Input
         value={query}
@@ -143,7 +112,7 @@ export default function NewCommunityScreen() {
         </ScrollView>
       )}
 
-      <Button label={t("newGroup.create")} onPress={handleCreate} disabled={!canCreate} loading={isCreating} />
+      <Button label={t("groupDetails.addMember")} onPress={handleAdd} disabled={!canAdd} loading={isAdding} />
     </ScreenContainer>
   );
 }

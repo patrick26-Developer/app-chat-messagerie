@@ -15,6 +15,7 @@ export default function NewGroupScreen() {
   const { t } = useI18n();
   const router = useRouter();
   const { profile: myProfile } = useOwnProfile();
+  const auth = db.useAuth();
 
   const [query, setQuery] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -45,10 +46,10 @@ export default function NewGroupScreen() {
     );
   }
 
-  const canCreate = trimmedName.length > 0 && selected.length > 0 && !isCreating;
+  const canCreate = trimmedName.length > 0 && selected.length > 0 && !isCreating && Boolean(auth.user);
 
   async function handleCreate() {
-    if (!myProfile || !canCreate) return;
+    if (!myProfile || !auth.user || !canCreate) return;
     setIsCreating(true);
     try {
       const chatId = id();
@@ -61,6 +62,9 @@ export default function NewGroupScreen() {
           createdAt: now,
           lastMessageAt: now,
           lastMessagePreview: "",
+          // $user.id (pas profile.id) : chats.isAdmin compare directement à
+          // auth.id, cf. instant.perms.ts.
+          adminUserIds: [auth.user.id],
         }),
         db.tx.memberships[id()]
           .update({ role: "admin", joinedAt: now, lastReadAt: now, muted: false })

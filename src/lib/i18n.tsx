@@ -122,6 +122,12 @@ const translations = {
     "newCommunity.descriptionPlaceholder": "Description (optionnel)",
     "profile.loadingProfile": "Chargement du profil…",
     "profile.signOut": "Se déconnecter",
+    "groupDetails.groupTitle": "Groupe",
+    "groupDetails.communityTitle": "Communauté",
+    "groupDetails.memberCount": "{{count}} membre(s)",
+    "groupDetails.roleAdmin": "Admin",
+    "groupDetails.addMember": "Ajouter un membre",
+    "addGroupMember.title": "Ajouter un membre",
   },
   en: {
     "app.name": "Causerie",
@@ -242,6 +248,12 @@ const translations = {
     "newCommunity.descriptionPlaceholder": "Description (optional)",
     "profile.loadingProfile": "Loading profile…",
     "profile.signOut": "Sign out",
+    "groupDetails.groupTitle": "Group",
+    "groupDetails.communityTitle": "Community",
+    "groupDetails.memberCount": "{{count}} member(s)",
+    "groupDetails.roleAdmin": "Admin",
+    "groupDetails.addMember": "Add member",
+    "addGroupMember.title": "Add member",
   },
 } as const satisfies Record<Locale, Record<string, string>>;
 

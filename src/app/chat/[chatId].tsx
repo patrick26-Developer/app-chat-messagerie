@@ -5,6 +5,7 @@ import { Send } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
 import { Avatar, ScreenContainer } from "@/components/ui";
 import { ChatContactMenu } from "@/components/chat-contact-menu";
+import { ChatGroupMenu } from "@/components/chat-group-menu";
 import { db } from "@/lib/db";
 import { useI18n } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
@@ -112,8 +113,9 @@ export default function ChatScreen() {
               </View>
             </View>
           ),
-          headerRight:
-            !chat?.isGroup && otherMember && myProfile
+          headerRight: chat?.isGroup
+            ? () => <ChatGroupMenu chatId={chat.id} />
+            : otherMember && myProfile
               ? () => <ChatContactMenu myProfileId={myProfile.id} otherProfileId={otherMember.id} />
               : undefined,
         }}
