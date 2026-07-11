@@ -98,10 +98,39 @@ export default function ChatScreen() {
     setInputHeight(MIN_MESSAGE_INPUT_HEIGHT);
   }
 
-  function handleLongPressMessage(message: { id: string; text: string }) {
+  async function handleDeleteMessage(messageId: string, messageCreatedAt: string | number) {
+    if (!chatId) return;
+    if (editingMessageId === messageId) {
+      cancelEditingMessage();
+    }
+    // Comparaison à `chat.lastMessageAt` (pas au premier élément du tableau
+    // `messages` trié côté client) : `createdAt` du message et
+    // `lastMessageAt` du chat sont écrits avec le même `now` à l'envoi
+    // (cf. `handleSend`), donc cette égalité identifie le dernier message
+    // sans dépendre de la complétude/tri du tableau local.
+    const isLastMessage = messageCreatedAt === chat?.lastMessageAt;
+    await db.transact([
+      db.tx.messages[messageId].update({ text: "", deletedAt: new Date().toISOString() }),
+      ...(isLastMessage ? [db.tx.chats[chatId].update({ lastMessagePreview: t("chat.deletedMessage") })] : []),
+    ]);
+  }
+
+  function confirmDeleteMessage(messageId: string, messageCreatedAt: string | number) {
+    Alert.alert(t("chat.deleteMessage.confirmTitle"), t("chat.deleteMessage.confirmMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("chat.deleteMessage.confirm"),
+        style: "destructive",
+        onPress: () => handleDeleteMessage(messageId, messageCreatedAt),
+      },
+    ]);
+  }
+
+  function handleLongPressMessage(message: { id: string; text: string; createdAt: string | number }) {
     Alert.alert("", undefined, [
       { text: t("common.cancel"), style: "cancel" },
       { text: t("chat.menu.edit"), onPress: () => startEditingMessage(message) },
+      { text: t("chat.menu.delete"), style: "destructive", onPress: () => confirmDeleteMessage(message.id, message.createdAt) },
     ]);
   }
 
@@ -111,6 +140,8 @@ export default function ChatScreen() {
 
   function renderMessage({ item, index }: { item: (typeof messages)[number]; index: number }) {
     const isMine = item.sender?.id === myProfile?.id;
+    const isDeleted = Boolean(item.deletedAt);
+    const canModify = isMine && !isDeleted && item.type !== "system";
     const time = new Date(item.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     const bubbleColor = isMine ? colors.bubbleMine : colors.bubbleOther;
     const textColor = isMine ? colors.bubbleMineText : colors.bubbleOtherText;
@@ -138,11 +169,11 @@ export default function ChatScreen() {
             </Text>
           </Pressable>
         ) : null}
-        <Text selectable style={{ color: textColor }}>
-          {item.text}
+        <Text selectable={!isDeleted} style={{ color: textColor, fontStyle: isDeleted ? "italic" : "normal", opacity: isDeleted ? 0.7 : 1 }}>
+          {isDeleted ? t("chat.deletedMessage") : item.text}
         </Text>
         <View className="mt-1 flex-row items-center justify-end gap-1">
-          {item.editedAt ? (
+          {item.editedAt && !isDeleted ? (
             // `textColor` (pas `colors.textMuted`) + opacité réduite : même
             // technique que l'heure juste à côté, pour garantir le contraste
             // avec le fond de LA bulle plutôt qu'une couleur pensée pour
@@ -159,7 +190,7 @@ export default function ChatScreen() {
       </View>
     );
 
-    const bubble = isMine ? (
+    const bubble = canModify ? (
       <Pressable onLongPress={() => handleLongPressMessage(item)}>{bubbleContent}</Pressable>
     ) : (
       bubbleContent
