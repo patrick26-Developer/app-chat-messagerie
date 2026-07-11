@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Send, X } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
-import { Avatar, ScreenContainer } from "@/components/ui";
+import { ActionSheet, Avatar, ConfirmDialog, ScreenContainer, type ActionSheetItem } from "@/components/ui";
 import { ChatContactMenu } from "@/components/chat-contact-menu";
 import { ChatGroupMenu } from "@/components/chat-group-menu";
 import { db } from "@/lib/db";
@@ -16,6 +16,15 @@ const MIN_MESSAGE_INPUT_HEIGHT = 44;
 // ~5 lignes avant que le champ ne scroll en interne plutôt que de continuer à grandir.
 const MAX_MESSAGE_INPUT_HEIGHT = 130;
 const GROUP_MESSAGE_AVATAR_SIZE = 28;
+// Délai avant l'ouverture du ConfirmDialog après la fermeture de l'ActionSheet
+// (choix "Supprimer") : évite un chevauchement visuel entre les deux Modal
+// natifs (backdrop qui se superposerait un instant). Valeur non testée sur
+// device faute d'écran observable depuis cet environnement — à ajuster si
+// perçue comme un délai gênant.
+const ACTION_SHEET_TRANSITION_DELAY_MS = 150;
+
+type MessageActionsTarget = { id: string; text: string; createdAt: string | number };
+type MessageDeleteTarget = { id: string; createdAt: string | number };
 
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -29,6 +38,8 @@ export default function ChatScreen() {
   const [text, setText] = useState("");
   const [inputHeight, setInputHeight] = useState(MIN_MESSAGE_INPUT_HEIGHT);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [actionsTarget, setActionsTarget] = useState<MessageActionsTarget | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MessageDeleteTarget | null>(null);
   const hasMarkedRead = useRef(false);
 
   const chatQuery = db.useQuery(
@@ -115,24 +126,30 @@ export default function ChatScreen() {
     ]);
   }
 
-  function confirmDeleteMessage(messageId: string, messageCreatedAt: string | number) {
-    Alert.alert(t("chat.deleteMessage.confirmTitle"), t("chat.deleteMessage.confirmMessage"), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("chat.deleteMessage.confirm"),
-        style: "destructive",
-        onPress: () => handleDeleteMessage(messageId, messageCreatedAt),
-      },
-    ]);
+  function handleLongPressMessage(message: MessageActionsTarget & { deletedAt?: string | number }) {
+    if (message.deletedAt) return;
+    setActionsTarget(message);
   }
 
-  function handleLongPressMessage(message: { id: string; text: string; createdAt: string | number }) {
-    Alert.alert("", undefined, [
-      { text: t("common.cancel"), style: "cancel" },
-      { text: t("chat.menu.edit"), onPress: () => startEditingMessage(message) },
-      { text: t("chat.menu.delete"), style: "destructive", onPress: () => confirmDeleteMessage(message.id, message.createdAt) },
-    ]);
-  }
+  const actionSheetItems: ActionSheetItem[] = actionsTarget
+    ? [
+        {
+          key: "edit",
+          label: t("chat.menu.edit"),
+          onPress: () => startEditingMessage(actionsTarget),
+        },
+        {
+          key: "delete",
+          label: t("chat.menu.delete"),
+          variant: "destructive",
+          onPress: () => {
+            const target: MessageDeleteTarget = { id: actionsTarget.id, createdAt: actionsTarget.createdAt };
+            setTimeout(() => setDeleteTarget(target), ACTION_SHEET_TRANSITION_DELAY_MS);
+          },
+        },
+        { key: "cancel", label: t("common.cancel"), variant: "cancel", onPress: () => {} },
+      ]
+    : [];
 
   function goToSenderProfile(senderId: string | undefined) {
     if (senderId) router.push({ pathname: "/contact-details", params: { profileId: senderId } });
@@ -302,6 +319,27 @@ export default function ChatScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      <ActionSheet
+        visible={actionsTarget != null}
+        onRequestClose={() => setActionsTarget(null)}
+        title={t("chat.messageActions.title")}
+        subtitle={t("chat.messageActions.subtitle")}
+        items={actionSheetItems}
+      />
+      <ConfirmDialog
+        visible={deleteTarget != null}
+        onRequestClose={() => setDeleteTarget(null)}
+        title={t("chat.deleteMessage.confirmTitle")}
+        message={t("chat.deleteMessage.confirmMessage")}
+        confirmLabel={t("chat.deleteMessage.confirm")}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          if (deleteTarget) {
+            handleDeleteMessage(deleteTarget.id, deleteTarget.createdAt);
+          }
+          setDeleteTarget(null);
+        }}
+      />
     </ScreenContainer>
   );
 }

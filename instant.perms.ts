@@ -148,11 +148,21 @@ const rules = {
       // modified-fields=["contacts","contactedBy"].
       isBeingAddedAsContact:
         "auth.id != null && request.modifiedFields.all(f, f in ['contacts', 'contactedBy'])",
+      // Ajout (blocage) : créer une ligne `blocks` et la lier via
+      // `.link({ blocker, blocked })` touche réciproquement
+      // `profiles.blockedByProfiles` sur le profil BLOQUÉ (pas auth) — même
+      // mécanique que isBeingAddedAsContact/isBeingAddedToChat. Pure
+      // vérification sur `request.modifiedFields` (aucun `data.ref()`),
+      // donc pas concernée par la limitation `debugTransact` sur les liens
+      // reverse fraîchement créés — fiable en simulation comme en réel.
+      isBeingBlocked:
+        "auth.id != null && size(request.modifiedFields) == 1 && 'blockedByProfiles' in request.modifiedFields",
     },
     allow: {
       view: "true",
       create: "isOwner",
-      update: "isOwner || isBeingAddedToChat || isBeingAddedAsFriendRequestParty || isBeingAddedAsContact",
+      update:
+        "isOwner || isBeingAddedToChat || isBeingAddedAsFriendRequestParty || isBeingAddedAsContact || isBeingBlocked",
       delete: "isOwner",
     },
   },
@@ -294,11 +304,18 @@ const rules = {
       // test 5) avant correction.
       isAdmin: "auth.id != null && data.adminUserIds != null && auth.id in data.adminUserIds",
     },
+    // Ajout (blocage) : `messagingBlocked` ajouté à la liste des champs
+    // autorisés dans la branche `isMember` existante — c'est un update
+    // scalaire pur (jamais de `.link()` dans cette transaction), donc
+    // aucune vérification réciproque sur `profiles` à craindre ici (cf.
+    // le motif déjà documenté partout ailleurs dans ce fichier : seul
+    // l'établissement d'un LIEN déclenche ce genre de vérification, jamais
+    // une mise à jour de champ scalaire). Aucun nouveau bind nécessaire.
     allow: {
       view: "isMember",
       create: "isMember",
       update:
-        "isMember && (request.modifiedFields.all(f, f in ['lastMessageAt', 'lastMessagePreview', 'messages']) || (isAdmin && request.modifiedFields.all(f, f in ['memberships'])))",
+        "isMember && (request.modifiedFields.all(f, f in ['lastMessageAt', 'lastMessagePreview', 'messages', 'messagingBlocked']) || (isAdmin && request.modifiedFields.all(f, f in ['memberships'])))",
       delete: "false",
     },
   },
@@ -390,14 +407,26 @@ const rules = {
   // d'identité dans le fil de discussion). `create` exige maintenant `isMember`
   // ET `isSender` (l'expéditeur lié au message doit être l'utilisateur authentifié
   // lui-même), en plus d'être membre du chat.
+  // Ajout (blocage) : `isChatNotBlocked` lit `chat.messagingBlocked`, un
+  // champ scalaire dénormalisé sur `chats` (cf. instant.schema.ts) — un
+  // seul hop to-one (message -> chat), délibérément PAS une corrélation
+  // `data.ref()` à travers `chat.memberships` (to-many) pour éviter de
+  // reproduire la faille `isAdmin` (cf. commentaire sur ce bind plus haut).
+  // `chat` est une étiquette REVERSE sur `messages` (reverse de
+  // `chatMessages`, forward côté `chats`) et fraîchement liée à chaque
+  // envoi (`.link({ chat: chatId, ... })`) — même famille que le piège
+  // documenté pour `contacts.owner`/`contact` : `debugTransact` seul n'est
+  // PAS fiable ici, testé via de vrais `db.asUser().transact()` (cf.
+  // résultats donnés à l'utilisateur).
   messages: {
     bind: {
       isMember: "auth.id != null && auth.id in data.ref('chat.memberships.profile.$user.id')",
       isSender: "auth.id != null && auth.id in data.ref('sender.$user.id')",
+      isChatNotBlocked: "!(true in data.ref('chat.messagingBlocked'))",
     },
     allow: {
       view: "isMember",
-      create: "isMember && isSender",
+      create: "isMember && isSender && isChatNotBlocked",
       update: "isSender",
       delete: "isSender",
     },
@@ -642,6 +671,37 @@ const rules = {
       create: "isAcceptedByReceiver",
       update: "false",
       delete: "isPartOfContact",
+    },
+  },
+
+  // Ajout (blocage) : `blocker`/`blocked` sont des étiquettes FORWARD
+  // définies directement sur `blocks` (contrairement à `owner`/`contact`
+  // sur `contacts`, qui sont reverse) — donc fiables en simulation
+  // `debugTransact`, testées quand même via de vrais comptes par prudence
+  // (cf. résultats donnés à l'utilisateur).
+  //
+  // `isNotSelfBlock` : compare deux `data.ref()` entre eux, même famille
+  // que l'égalité déjà validée dans `contacts.isAcceptedByReceiver`
+  // (`data.ref('owner.id') == data.ref('sourceRequest.from.id')`).
+  //
+  // `view: isBlocker` uniquement — décision produit : le bloqué ne doit
+  // jamais pouvoir lire qu'il a été bloqué (pas de notification), donc pas
+  // de bind `isBlocked` pour `view`.
+  //
+  // `delete` (déblocage) : pas de bind réciproque `profiles` anticipé,
+  // même constat que pour `contacts` (suppression ne déclenche jamais de
+  // vérification réciproque, seule la création via `.link()` le fait) — à
+  // reconfirmer empiriquement avant de considérer ça acquis.
+  blocks: {
+    bind: {
+      isBlocker: "auth.id != null && auth.id in data.ref('blocker.$user.id')",
+      isNotSelfBlock: "data.ref('blocker.id') != data.ref('blocked.id')",
+    },
+    allow: {
+      view: "isBlocker",
+      create: "isBlocker && isNotSelfBlock",
+      update: "false",
+      delete: "isBlocker",
     },
   },
 
