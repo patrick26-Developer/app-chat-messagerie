@@ -3,13 +3,14 @@ import type { ColorSchemePreference, PaletteName } from "@/lib/theme";
 
 export type MembershipRole = "admin" | "member";
 export type FriendRequestStatus = "pending" | "accepted" | "declined";
-export type MessageType = "text" | "system" | "contactCard";
+export type MessageType = "text" | "system";
 
 const _schema = i.schema({
   entities: {
     $users: i.entity({
       email: i.string().unique().indexed(),
     }),
+    
     // Namespace système géré par Instant (storage). `path`/`url` déclarés
     // uniquement pour le TYPAGE de lecture (`where: { path }`, lire
     // `$files.url`) — l'écriture reste de toute façon bloquée par la
@@ -42,24 +43,6 @@ const _schema = i.schema({
       createdAt: i.date(),
       lastMessageAt: i.date(),
       lastMessagePreview: i.string(),
-      // Dénormalisé depuis memberships.role (maintenu par l'app, jamais lu
-      // depuis memberships côté permissions) : contient des $user.id (pas
-      // des profile.id), pour que la règle `chats.isAdmin` reste un test
-      // simple sur cette ligne (`auth.id in data.adminUserIds`), sans
-      // corrélation data.ref() sur la collection to-many `memberships` —
-      // cf. faille isAdmin documentée dans instant.perms.ts. Optionnel :
-      // les chats créés avant l'introduction de ce champ sont backfillés
-      // séparément (cf. scripts/backfill-admin-user-ids.ts).
-      adminUserIds: i.json<string[]>().optional(),
-      // Dénormalisé également (même logique qu'adminUserIds) : maintenu par
-      // l'app au blocage/déblocage, pour que `messages.isChatNotBlocked`
-      // reste un test scalaire sur le chat courant (un seul hop to-one
-      // message -> chat), plutôt qu'une corrélation data.ref() à deux hops
-      // to-many (chat -> memberships -> profile -> blockedProfiles) jamais
-      // testée dans ce projet — cf. instant.perms.ts pour le détail.
-      // Uniquement pertinent pour les chats 1-to-1 (jamais posé sur un
-      // groupe/communauté, le blocage n'a pas d'effet là — décision produit).
-      messagingBlocked: i.boolean().optional(),
     }),
     memberships: i.entity({
       role: i.string<MembershipRole>(),
@@ -73,15 +56,6 @@ const _schema = i.schema({
       createdAt: i.date(),
       editedAt: i.date().optional(),
       deletedAt: i.date().optional(),
-      // Carte de contact partagée (type "contactCard") : snapshot au moment
-      // du partage, PAS de lien InstantDB vers le profil partagé — un lien
-      // déclencherait une vérification profiles.update réciproque sur un
-      // profil tiers (même piège que isBeingAddedToChat/
-      // isBeingAddedAsFriendRequestParty). L'écran résout le profil ACTUEL
-      // via contactCardUsername au moment de l'ouverture, pas ces champs.
-      contactCardUsername: i.string().optional(),
-      contactCardDisplayName: i.string().optional(),
-      contactCardAvatarPath: i.string().optional(),
     }),
     statuses: i.entity({
       content: i.string(),
@@ -97,16 +71,8 @@ const _schema = i.schema({
       note: i.string().optional(),
       createdAt: i.date(),
     }),
+  
     contacts: i.entity({
-      createdAt: i.date(),
-    }),
-    // Blocage : une ligne par blocage, à sens unique (contrairement à
-    // `contacts` qui crée 2 lignes symétriques) — bloquer B n'implique pas
-    // que B bloque A. `blocker`/`blocked` sont des étiquettes FORWARD
-    // définies directement sur `blocks` (pas reverse comme `owner`/
-    // `contact` sur `contacts`), donc fiables en simulation debugTransact
-    // (cf. section "Méthodologie de test des permissions" dans CLAUDE.md).
-    blocks: i.entity({
       createdAt: i.date(),
     }),
   },
@@ -163,14 +129,6 @@ const _schema = i.schema({
       forward: { on: "contacts", has: "one", label: "sourceRequest" },
       reverse: { on: "friendRequests", has: "many", label: "resultingContacts" },
     },
-    blockBlocker: {
-      forward: { on: "blocks", has: "one", label: "blocker" },
-      reverse: { on: "profiles", has: "many", label: "blockedProfiles" },
-    },
-    blockBlocked: {
-      forward: { on: "blocks", has: "one", label: "blocked" },
-      reverse: { on: "profiles", has: "many", label: "blockedByProfiles" },
-    },
   },
   rooms: {
     // Room globale unique pour la présence en ligne (pas persisté en base,
@@ -202,4 +160,3 @@ export type Status = InstaQLEntity<AppSchema, "statuses">;
 export type StatusView = InstaQLEntity<AppSchema, "statusViews">;
 export type FriendRequest = InstaQLEntity<AppSchema, "friendRequests">;
 export type Contact = InstaQLEntity<AppSchema, "contacts">;
-export type Block = InstaQLEntity<AppSchema, "blocks">;
