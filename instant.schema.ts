@@ -28,6 +28,12 @@ const _schema = i.schema({
       avatarUrl: i.string().optional(),
       bio: i.string().optional(),
       phone: i.string().optional().indexed(),
+      // Liste (pas un seul token) pour supporter plusieurs appareils par
+      // utilisateur — fusionné par l'app dans src/lib/pushNotifications.ts,
+      // jamais écrasé (un nouvel appareil ajoute son token sans retirer
+      // ceux des autres). Nettoyage des tokens invalides ("DeviceNotRegistered")
+      // prévu côté webhook (étape 2/3 des notifications), pas ici.
+      pushTokens: i.json<string[]>().optional(),
       lastSeenAt: i.date(),
       createdAt: i.date(),
       paletteName: i.string<PaletteName>(),

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "629568808154",
+    "project_id": "chatrealtimewithnotification",
+    "storage_bucket": "chatrealtimewithnotification.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:629568808154:android:a6ab52b5087df5b899f1e3",
+        "android_client_info": {
+          "package_name": "com.chatrealtime.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyfh-rvX8Lp8pT4MQKPTuDXxY9U37w8dw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

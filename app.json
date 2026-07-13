@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.chatrealtime.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -42,11 +43,19 @@
           "cameraPermission": false,
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cc2171a4-8abc-412d-a589-6afb3099bebf"
+      }
+    },
+    "owner": "patrick_degrace"
   }
 }

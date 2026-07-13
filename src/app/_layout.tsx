@@ -7,6 +7,7 @@ import { ScreenContainer } from "@/components/ui";
 import { db } from "@/lib/db";
 import { createDefaultProfile, useOwnProfile } from "@/lib/profile";
 import { usePublishOwnPresence } from "@/lib/presence";
+import { useRegisterPushToken } from "@/lib/pushNotifications";
 import { I18nProvider } from "@/lib/i18n";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import "../../global.css";
@@ -27,6 +28,7 @@ function AuthGate({ children }: { children: ReactNode }) {
   const { profile, isLoading: isProfileLoading } = useOwnProfile();
   const hasAttemptedProfileCreation = useRef(false);
   usePublishOwnPresence();
+  useRegisterPushToken();
 
   useEffect(() => {
     if (auth.user && !isProfileLoading && !profile && !hasAttemptedProfileCreation.current) {
