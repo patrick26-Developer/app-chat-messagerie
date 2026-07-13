@@ -136,8 +136,26 @@ anglais, basé à Brazzaville.
       le dernier message du chat ; aucun changement de permission requis
       (`messages.update`/`delete` = `isSender` couvrait déjà le cas)
       (commits 6917ed5, f5d0563, d3147df)
-- [ ] Actualités ("News") : route/i18n/chip existent, écran = stub vide
-      (news.tsx n'affiche qu'un EmptyState, aucun contenu réel)
+- [X] Actualités ("News") : fil d'annonces officielles, entité `announcements`
+      dédiée SANS lien vers `profiles` (un seul auteur possible, l'admin de
+      l'app, donc rien à corréler pour l'autorisation) — `title` optionnel,
+      `body`, `createdAt`. Admin identifié par comparaison DIRECTE
+      `auth.email` contre `src/lib/adminEmail.ts` (source unique, importée
+      à la fois par `instant.perms.ts` et par l'UI), pas de champ
+      `profiles.isAppAdmin` ni de système de rôles. Permission `isAppAdmin`
+      testée empiriquement 8/8 (guest : rien ; non-admin authentifié : view
+      seul ; admin : create/update/delete) avant d'écrire la moindre UI.
+      `news.tsx` : `FlatList` triée par `createdAt` décroissant, bouton "+"
+      visible seulement si l'email authentifié correspond (confort côté
+      client, la vraie protection reste la permission) → `publish-
+      announcement.tsx` (titre optionnel + corps requis, écriture directe
+      sans `.link()`).
+      **Solution temporaire avant lancement public** : cet écran mobile de
+      composition est un pis-aller en attendant un futur dashboard admin
+      séparé (Next.js, prévu à terme) pour la publication d'annonces et un
+      contrôle plus large de l'app — reste utile pour publier depuis le
+      mobile en attendant que ce dashboard existe, pas à supprimer une fois
+      qu'il sera là.
 - [X] Blocage de contact (chat-contact-menu.tsx + chat/[chatId].tsx) :
       libellé dynamique "Bloquer"/"Débloquer" piloté par une query
       `blocks{blocker:me, blocked:other}` (`view: isBlocker` : je ne vois
