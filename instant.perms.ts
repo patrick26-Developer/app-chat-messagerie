@@ -1,5 +1,6 @@
 import type { InstantRules } from "@instantdb/react-native";
 import type { AppSchema } from "./instant.schema";
+import { ADMIN_EMAIL } from "./src/lib/adminEmail";
 
 const rules = {
   $default: {
@@ -771,6 +772,40 @@ const rules = {
       create: "isOwnPath",
       update: "false",
       delete: "isOwnPath",
+    },
+  },
+
+  // Actualités ("News") : un seul auteur possible (l'admin de l'app), donc
+  // identification par comparaison DIRECTE `auth.email` contre une
+  // constante (src/lib/adminEmail.ts, source unique partagée avec l'UI côté
+  // client) — pas de data.ref(), donc aucun risque de corrélation.
+  //
+  // Testé empiriquement le 2026-07-13 via `debugTransact`/`debugQuery` avec
+  // règles overridées (dry-run, jamais écrit en vrai - seule une ligne
+  // fixture créée en bypass admin puis nettoyée a réellement existé) sur de
+  // vrais comptes (`db.asUser({email})`) : `auth.email` est bien exposé et
+  // comparable tel quel dans ce contexte CEL - pas une supposition. 8/8 :
+  // (1) guest ne voit rien. (2) non-admin authentifié voit la fixture.
+  // (3) non-admin : create refusé. (4) non-admin : update refusé.
+  // (5) non-admin : delete refusé. (6) admin : create réussit. (7) admin :
+  // update réussit. (8) admin : delete réussit.
+  //
+  // Piège méthodologique rencontré en écrivant ce test (pas un problème de
+  // règle) : `debugTransact` RÉSOUT (ne rejette pas) avec
+  // `{'all-checks-ok?': boolean}` même quand la permission refuse l'écriture
+  // - contrairement à `transact()` normal qui rejette avec une erreur. Un
+  // premier passage du script qui ne lisait que try/catch (sans inspecter
+  // `all-checks-ok?`) rapportait à tort "réussi" pour des écritures
+  // refusées. Corrigé avant de tirer une quelconque conclusion.
+  announcements: {
+    bind: {
+      isAppAdmin: `auth.email == '${ADMIN_EMAIL}'`,
+    },
+    allow: {
+      view: "auth.id != null",
+      create: "isAppAdmin",
+      update: "isAppAdmin",
+      delete: "isAppAdmin",
     },
   },
 } satisfies InstantRules<AppSchema>;
