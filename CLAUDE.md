@@ -138,16 +138,38 @@ anglais, basé à Brazzaville.
       (commits 6917ed5, f5d0563, d3147df)
 - [ ] Actualités ("News") : route/i18n/chip existent, écran = stub vide
       (news.tsx n'affiche qu'un EmptyState, aucun contenu réel)
-- [ ] Blocage de contact, partage de contact : schéma + permissions prêts
-      et testés (14/14) — `chats.messagingBlocked` (champ scalaire dénormalisé,
-      lu par `messages.isChatNotBlocked`), entité `blocks` dédiée
-      (`blocker`/`blocked` en étiquettes forward, `view: isBlocker` uniquement
-      pour que le bloqué ne soit jamais notifié), `messages.contactCard*`
-      (snapshot username/displayName/avatarPath, pas de lien InstantDB vers
-      le profil partagé — cf. section Incidents pour l'historique de ces
-      champs) — mais AUCUNE UI ne les consomme encore : entrées de menu
-      toujours en stub "bientôt disponible" (chat-contact-menu.tsx). Pas de
-      case à cocher tant que l'UI n'est pas livrée.
+- [X] Blocage de contact (chat-contact-menu.tsx + chat/[chatId].tsx) :
+      libellé dynamique "Bloquer"/"Débloquer" piloté par une query
+      `blocks{blocker:me, blocked:other}` (`view: isBlocker` : je ne vois
+      jamais que ma propre décision de bloquer, jamais celle de l'autre —
+      pas de notification) ; bloquer passe par le `ConfirmDialog` partagé,
+      débloquer est une action directe ; les deux écrivent en une seule
+      transaction la ligne `blocks` (créée/supprimée) ET le champ scalaire
+      dénormalisé `chats.messagingBlocked` (lu par `messages.isChatNotBlocked`,
+      c'est lui qui coupe réellement l'envoi des deux côtés). Composeur
+      masqué pour les deux membres dès que `messagingBlocked` est vrai ;
+      seul le bloqueur voit en plus une bannière ("Vous avez bloqué ce
+      contact.") avec un raccourci "Débloquer". `blocks.delete` (isBlocker)
+      reconfirmé empiriquement (9/9) sans check réciproque sur `profiles`
+      (cf. instant.perms.ts et section Incidents).
+- [X] Partage de contact (share-contact.tsx + rendu `contactCard` dans
+      chat/[chatId].tsx) : écran allégé sur le pattern select-contact.tsx
+      (liste "Mes contacts" uniquement, pas de recherche globale) reçoit le
+      profil à partager via route params ; sélectionner un contact résout-
+      ou-crée son chat 1-to-1 (`resolveOrCreateDirectChatId`, cf. Patterns
+      retenus) puis y poste un message `type: "contactCard"` avec un
+      snapshot (`contactCardUsername`/`DisplayName`/`AvatarPath`) du profil
+      partagé — délibérément PAS de lien InstantDB vers ce profil (même
+      motif que les autres liens réciproques documentés dans ce fichier :
+      un lien déclencherait une vérification `profiles.update` sur un
+      profil tiers). Rendu dans le fil : petite carte (avatar + nom +
+      @username) via un composant dédié `ContactCardMessage` (résoudre
+      l'avatar demande un hook, `renderMessage` étant appelé comme simple
+      fonction par `FlatList`, pas comme un composant). Tap sur la carte :
+      résout le profil ACTUEL par `contactCardUsername` (jamais le
+      snapshot) avant de naviguer vers contact-details, avec une alerte de
+      repli si ce profil n'existe plus. "Modifier" exclu de l'ActionSheet
+      pour ce type (rien de libre à éditer), "Supprimer" inchangé.
 - [ ] Notifications : rien de commencé (aucun schéma, aucune lib, aucun
       token push)
 
@@ -233,6 +255,17 @@ anglais, basé à Brazzaville.
   commit.
 
 ## Patterns retenus
+
+- **Résolution/création d'un chat 1-to-1 : helper partagé
+  `resolveOrCreateDirectChatId` (`src/lib/chats.ts`), pas dupliqué par
+  point d'entrée.** Cherche un chat 1-to-1 existant avec un profil cible
+  (via mes propres `memberships`) et en crée un sinon (chat + 2
+  memberships). Extrait de `select-contact.tsx` (nouvelle discussion) au
+  moment où `share-contact.tsx` (partage de contact) en a eu besoin aussi
+  — deux points d'entrée réels au moment de l'extraction, donc pas une
+  abstraction prématurée. Tout futur flux qui doit "ouvrir ou créer une
+  discussion 1-to-1 avec X" (ex. un futur bouton "message" depuis un profil)
+  doit réutiliser ce helper plutôt que réimplémenter la recherche.
 
 - **InstantDB Storage (`$files`) renvoie des URLs signées qui expirent**
   (~7 jours, confirmé empiriquement en décodant le paramètre `Policy` d'une
