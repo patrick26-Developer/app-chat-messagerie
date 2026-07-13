@@ -4,6 +4,7 @@ import { Stack, useRouter } from "expo-router";
 import { UserCheck, UserPlus, Users } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
 import { Avatar, EmptyState, Input, ListItem, ScreenContainer } from "@/components/ui";
+import { resolveOrCreateDirectChatId } from "@/lib/chats";
 import { db } from "@/lib/db";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
@@ -95,38 +96,7 @@ export default function SelectContactScreen() {
     if (!myProfile || isCreating) return;
     setIsCreating(true);
     try {
-      const existing = await db.queryOnce({
-        memberships: {
-          $: { where: { "profile.id": myProfile.id } },
-          chat: { memberships: { profile: {} } },
-        },
-      });
-
-      const existingChat = existing.data.memberships
-        .map((membership) => membership.chat)
-        .find(
-          (chat) =>
-            chat && !chat.isGroup && chat.memberships?.some((member) => member.profile?.id === targetProfile.id),
-        );
-
-      if (existingChat) {
-        router.replace({ pathname: "/chat/[chatId]", params: { chatId: existingChat.id } });
-        return;
-      }
-
-      const chatId = id();
-      const now = new Date().toISOString();
-
-      await db.transact([
-        db.tx.chats[chatId].update({ isGroup: false, createdAt: now, lastMessageAt: now, lastMessagePreview: "" }),
-        db.tx.memberships[id()]
-          .update({ role: "member", joinedAt: now, lastReadAt: now, muted: false })
-          .link({ chat: chatId, profile: myProfile.id }),
-        db.tx.memberships[id()]
-          .update({ role: "member", joinedAt: now, lastReadAt: now, muted: false })
-          .link({ chat: chatId, profile: targetProfile.id }),
-      ]);
-
+      const chatId = await resolveOrCreateDirectChatId(myProfile.id, targetProfile.id);
       router.replace({ pathname: "/chat/[chatId]", params: { chatId } });
     } finally {
       setIsCreating(false);

@@ -104,7 +104,7 @@ export function ChatContactMenu({ myProfileId, otherProfileId, chatId }: ChatCon
       return;
     }
     if (entry.key === "shareContact") {
-      Alert.alert(t(entry.labelKey), t("common.comingSoon"));
+      router.push({ pathname: "/share-contact", params: { profileId: otherProfileId } });
       return;
     }
     if (entry.key === "block") {

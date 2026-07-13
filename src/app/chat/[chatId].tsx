@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Send, X } from "lucide-react-native";
 import { id } from "@instantdb/react-native";
@@ -10,12 +10,14 @@ import { db } from "@/lib/db";
 import { useI18n } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
 import { useOwnProfile } from "@/lib/profile";
+import { useResolvedAvatarUri } from "@/lib/storage";
 import { useTheme } from "@/lib/theme";
 
 const MIN_MESSAGE_INPUT_HEIGHT = 44;
 // ~5 lignes avant que le champ ne scroll en interne plutôt que de continuer à grandir.
 const MAX_MESSAGE_INPUT_HEIGHT = 130;
 const GROUP_MESSAGE_AVATAR_SIZE = 28;
+const CONTACT_CARD_AVATAR_SIZE = 40;
 // Délai avant l'ouverture du ConfirmDialog après la fermeture de l'ActionSheet
 // (choix "Supprimer") : évite un chevauchement visuel entre les deux Modal
 // natifs (backdrop qui se superposerait un instant). Valeur non testée sur
@@ -23,8 +25,38 @@ const GROUP_MESSAGE_AVATAR_SIZE = 28;
 // perçue comme un délai gênant.
 const ACTION_SHEET_TRANSITION_DELAY_MS = 150;
 
-type MessageActionsTarget = { id: string; text: string; createdAt: string | number };
+type MessageActionsTarget = { id: string; text: string; createdAt: string | number; type?: string };
 type MessageDeleteTarget = { id: string; createdAt: string | number };
+
+// Composant à part (pas juste du JSX inline dans renderMessage) : la
+// résolution de l'avatar via `useResolvedAvatarUri` est un hook, et
+// renderMessage est appelé comme simple fonction par FlatList, pas comme un
+// vrai composant React — y appeler un hook directement violerait les règles
+// des hooks.
+type ContactCardMessageProps = {
+  username: string | undefined;
+  displayName: string | undefined;
+  avatarPath: string | undefined;
+  textColor: string;
+  onPress: () => void;
+};
+
+function ContactCardMessage({ username, displayName, avatarPath, textColor, onPress }: ContactCardMessageProps) {
+  const avatarUri = useResolvedAvatarUri(avatarPath);
+  return (
+    <Pressable onPress={onPress} className="flex-row items-center gap-3 py-1" hitSlop={4}>
+      <Avatar uri={avatarUri} name={displayName} size={CONTACT_CARD_AVATAR_SIZE} />
+      <View>
+        <Text className="text-sm font-semibold" style={{ color: textColor }}>
+          {displayName}
+        </Text>
+        <Text className="text-xs" style={{ color: textColor, opacity: 0.7 }}>
+          @{username}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
 
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -150,11 +182,12 @@ export default function ChatScreen() {
 
   const actionSheetItems: ActionSheetItem[] = actionsTarget
     ? [
-        {
-          key: "edit",
-          label: t("chat.menu.edit"),
-          onPress: () => startEditingMessage(actionsTarget),
-        },
+        // "Modifier" n'a pas de sens pour une carte de contact partagée
+        // (pas de texte libre à éditer) - exclu pour ce type, "Supprimer"
+        // reste disponible tel quel.
+        ...(actionsTarget.type === "contactCard"
+          ? []
+          : [{ key: "edit", label: t("chat.menu.edit"), onPress: () => startEditingMessage(actionsTarget) }]),
         {
           key: "delete",
           label: t("chat.menu.delete"),
@@ -170,6 +203,21 @@ export default function ChatScreen() {
 
   function goToSenderProfile(senderId: string | undefined) {
     if (senderId) router.push({ pathname: "/contact-details", params: { profileId: senderId } });
+  }
+
+  // Ne jamais naviguer via le snapshot (contactCardUsername/DisplayName/
+  // AvatarPath) : c'est un aperçu figé au moment du partage, le profil
+  // ACTUEL est résolu par username juste avant de naviguer (cf.
+  // instant.schema.ts, commentaire sur messages.contactCard*).
+  async function goToContactCardProfile(username: string | undefined) {
+    if (!username) return;
+    const result = await db.queryOnce({ profiles: { $: { where: { username } } } });
+    const resolvedProfile = result.data.profiles[0];
+    if (resolvedProfile) {
+      router.push({ pathname: "/contact-details", params: { profileId: resolvedProfile.id } });
+    } else {
+      Alert.alert(t("chat.contactCard.unavailable"));
+    }
   }
 
   function renderMessage({ item, index }: { item: (typeof messages)[number]; index: number }) {
@@ -203,9 +251,19 @@ export default function ChatScreen() {
             </Text>
           </Pressable>
         ) : null}
-        <Text selectable={!isDeleted} style={{ color: textColor, fontStyle: isDeleted ? "italic" : "normal", opacity: isDeleted ? 0.7 : 1 }}>
-          {isDeleted ? t("chat.deletedMessage") : item.text}
-        </Text>
+        {item.type === "contactCard" && !isDeleted ? (
+          <ContactCardMessage
+            username={item.contactCardUsername}
+            displayName={item.contactCardDisplayName}
+            avatarPath={item.contactCardAvatarPath}
+            textColor={textColor}
+            onPress={() => goToContactCardProfile(item.contactCardUsername)}
+          />
+        ) : (
+          <Text selectable={!isDeleted} style={{ color: textColor, fontStyle: isDeleted ? "italic" : "normal", opacity: isDeleted ? 0.7 : 1 }}>
+            {isDeleted ? t("chat.deletedMessage") : item.text}
+          </Text>
+        )}
         <View className="mt-1 flex-row items-center justify-end gap-1">
           {item.editedAt && !isDeleted ? (
             // `textColor` (pas `colors.textMuted`) + opacité réduite : même
