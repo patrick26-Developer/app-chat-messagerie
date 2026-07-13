@@ -109,6 +109,16 @@ const _schema = i.schema({
     blocks: i.entity({
       createdAt: i.date(),
     }),
+    // Actualités ("News") : annonces officielles, un seul auteur possible
+    // (l'admin de l'app, identifié par email dans instant.perms.ts — pas
+    // de système de rôles), donc pas de lien vers `profiles` : rien à
+    // corréler pour l'autorisation, et l'UI n'affiche pas de "posté par X"
+    // (une seule source d'annonces, implicite).
+    announcements: i.entity({
+      title: i.string().optional(),
+      body: i.string(),
+      createdAt: i.date(),
+    }),
   },
   links: {
     profileUser: {
@@ -203,3 +213,4 @@ export type StatusView = InstaQLEntity<AppSchema, "statusViews">;
 export type FriendRequest = InstaQLEntity<AppSchema, "friendRequests">;
 export type Contact = InstaQLEntity<AppSchema, "contacts">;
 export type Block = InstaQLEntity<AppSchema, "blocks">;
+export type Announcement = InstaQLEntity<AppSchema, "announcements">;
