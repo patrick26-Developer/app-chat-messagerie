@@ -3,6 +3,8 @@ import { Alert, Modal, Pressable, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { MotiView } from "moti";
 import { EllipsisVertical, Eye, Share2, ShieldOff, UserMinus } from "lucide-react-native";
+import { id } from "@instantdb/react-native";
+import { ConfirmDialog } from "@/components/ui";
 import { db } from "@/lib/db";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
@@ -14,23 +16,52 @@ type MenuEntry = {
   danger?: boolean;
 };
 
-const ENTRIES: MenuEntry[] = [
-  { key: "viewContact", Icon: Eye, labelKey: "chat.menu.viewContact" },
-  { key: "shareContact", Icon: Share2, labelKey: "chat.menu.shareContact" },
-  { key: "removeContact", Icon: UserMinus, labelKey: "chat.menu.removeContact", danger: true },
-  { key: "block", Icon: ShieldOff, labelKey: "chat.menu.block", danger: true },
-];
-
 type ChatContactMenuProps = {
   myProfileId: string;
   otherProfileId: string;
+  chatId: string;
 };
 
-export function ChatContactMenu({ myProfileId, otherProfileId }: ChatContactMenuProps) {
+export function ChatContactMenu({ myProfileId, otherProfileId, chatId }: ChatContactMenuProps) {
   const { colors } = useTheme();
   const { t } = useI18n();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false);
+
+  // `view: isBlocker` seul (cf. instant.perms.ts) : cette query ne peut
+  // JAMAIS remonter une ligne où je suis `blocked` — seule ma propre
+  // décision de bloquer m'est visible, jamais celle de l'autre (pas de
+  // notification "vous avez été bloqué").
+  const blockQuery = db.useQuery({
+    blocks: { $: { where: { blocker: myProfileId, blocked: otherProfileId } } },
+  });
+  const blockRow = blockQuery.data?.blocks[0];
+  const isBlockedByMe = Boolean(blockRow);
+
+  const ENTRIES: MenuEntry[] = [
+    { key: "viewContact", Icon: Eye, labelKey: "chat.menu.viewContact" },
+    { key: "shareContact", Icon: Share2, labelKey: "chat.menu.shareContact" },
+    { key: "removeContact", Icon: UserMinus, labelKey: "chat.menu.removeContact", danger: true },
+    {
+      key: "block",
+      Icon: ShieldOff,
+      labelKey: isBlockedByMe ? "chat.menu.unblock" : "chat.menu.block",
+      danger: !isBlockedByMe,
+    },
+  ];
+
+  async function handleBlock() {
+    await db.transact([
+      db.tx.blocks[id()].update({ createdAt: new Date().toISOString() }).link({ blocker: myProfileId, blocked: otherProfileId }),
+      db.tx.chats[chatId].update({ messagingBlocked: true }),
+    ]);
+  }
+
+  async function handleUnblock() {
+    if (!blockRow) return;
+    await db.transact([db.tx.blocks[blockRow.id].delete(), db.tx.chats[chatId].update({ messagingBlocked: false })]);
+  }
 
   async function handleRemoveContact() {
     const [contactsRows, requestRows] = await Promise.all([
@@ -72,8 +103,16 @@ export function ChatContactMenu({ myProfileId, otherProfileId }: ChatContactMenu
       router.push({ pathname: "/contact-details", params: { profileId: otherProfileId } });
       return;
     }
-    if (entry.key === "shareContact" || entry.key === "block") {
+    if (entry.key === "shareContact") {
       Alert.alert(t(entry.labelKey), t("common.comingSoon"));
+      return;
+    }
+    if (entry.key === "block") {
+      if (isBlockedByMe) {
+        handleUnblock();
+      } else {
+        setIsBlockConfirmOpen(true);
+      }
       return;
     }
     if (entry.key === "removeContact") {
@@ -112,6 +151,18 @@ export function ChatContactMenu({ myProfileId, otherProfileId }: ChatContactMenu
           </MotiView>
         </Pressable>
       </Modal>
+      <ConfirmDialog
+        visible={isBlockConfirmOpen}
+        onRequestClose={() => setIsBlockConfirmOpen(false)}
+        title={t("chat.block.confirmTitle")}
+        message={t("chat.block.confirmMessage")}
+        confirmLabel={t("chat.block.confirm")}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          setIsBlockConfirmOpen(false);
+          handleBlock();
+        }}
+      />
     </>
   );
 }

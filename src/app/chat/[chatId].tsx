@@ -67,6 +67,23 @@ export default function ChatScreen() {
 
   const messages = [...(chat?.messages ?? [])].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
+  // Blocage : pertinent uniquement en 1-to-1 (cf. instant.schema.ts,
+  // commentaire sur `chats.messagingBlocked`). `view: isBlocker` seul (cf.
+  // instant.perms.ts) : je ne peux voir cette ligne que si c'est MOI qui ai
+  // bloqué l'autre, jamais l'inverse (pas de notification "vous avez été
+  // bloqué").
+  const blockQuery = db.useQuery(
+    myProfile && otherMember ? { blocks: { $: { where: { blocker: myProfile.id, blocked: otherMember.id } } } } : null,
+  );
+  const myBlockRow = blockQuery.data?.blocks[0];
+  const isBlockedByMe = Boolean(myBlockRow);
+  const isMessagingBlocked = Boolean(chat?.messagingBlocked);
+
+  async function handleUnblock() {
+    if (!myBlockRow || !chatId) return;
+    await db.transact([db.tx.blocks[myBlockRow.id].delete(), db.tx.chats[chatId].update({ messagingBlocked: false })]);
+  }
+
   useEffect(() => {
     if (myMembership && !hasMarkedRead.current) {
       hasMarkedRead.current = true;
@@ -258,8 +275,8 @@ export default function ChatScreen() {
           ),
           headerRight: chat?.isGroup
             ? () => <ChatGroupMenu chatId={chat.id} />
-            : otherMember && myProfile
-              ? () => <ChatContactMenu myProfileId={myProfile.id} otherProfileId={otherMember.id} />
+            : otherMember && myProfile && chat
+              ? () => <ChatContactMenu myProfileId={myProfile.id} otherProfileId={otherMember.id} chatId={chat.id} />
               : undefined,
         }}
       />
@@ -290,34 +307,51 @@ export default function ChatScreen() {
             </Pressable>
           </View>
         ) : null}
-        <View
-          className="flex-row items-center gap-2 border-t px-3 py-2"
-          style={{ borderTopColor: colors.border, backgroundColor: colors.surface }}
-        >
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder={t("chat.messagePlaceholder")}
-            placeholderTextColor={colors.placeholder}
-            multiline
-            blurOnSubmit={false}
-            onContentSizeChange={(event) => {
-              const nextHeight = event.nativeEvent.contentSize.height;
-              setInputHeight(Math.min(Math.max(nextHeight, MIN_MESSAGE_INPUT_HEIGHT), MAX_MESSAGE_INPUT_HEIGHT));
-            }}
-            className="flex-1 rounded-lg border px-4 py-3 text-base"
-            style={{
-              backgroundColor: colors.inputBackground,
-              color: colors.text,
-              borderColor: colors.border,
-              height: inputHeight,
-              maxHeight: MAX_MESSAGE_INPUT_HEIGHT,
-            }}
-          />
-          <Pressable onPress={handleSend} hitSlop={8}>
-            <Send color={colors.accent} size={22} />
-          </Pressable>
-        </View>
+        {isBlockedByMe ? (
+          <View
+            className="flex-row items-center justify-between border-t px-3 py-2"
+            style={{ borderTopColor: colors.border, backgroundColor: colors.surface }}
+          >
+            <Text className="text-xs" style={{ color: colors.textSecondary }}>
+              {t("chat.blockedBanner")}
+            </Text>
+            <Pressable onPress={handleUnblock} hitSlop={8}>
+              <Text className="text-xs font-semibold" style={{ color: colors.accent }}>
+                {t("chat.blockedBanner.unblock")}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {isMessagingBlocked ? null : (
+          <View
+            className="flex-row items-center gap-2 border-t px-3 py-2"
+            style={{ borderTopColor: colors.border, backgroundColor: colors.surface }}
+          >
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              placeholder={t("chat.messagePlaceholder")}
+              placeholderTextColor={colors.placeholder}
+              multiline
+              blurOnSubmit={false}
+              onContentSizeChange={(event) => {
+                const nextHeight = event.nativeEvent.contentSize.height;
+                setInputHeight(Math.min(Math.max(nextHeight, MIN_MESSAGE_INPUT_HEIGHT), MAX_MESSAGE_INPUT_HEIGHT));
+              }}
+              className="flex-1 rounded-lg border px-4 py-3 text-base"
+              style={{
+                backgroundColor: colors.inputBackground,
+                color: colors.text,
+                borderColor: colors.border,
+                height: inputHeight,
+                maxHeight: MAX_MESSAGE_INPUT_HEIGHT,
+              }}
+            />
+            <Pressable onPress={handleSend} hitSlop={8}>
+              <Send color={colors.accent} size={22} />
+            </Pressable>
+          </View>
+        )}
       </KeyboardAvoidingView>
       <ActionSheet
         visible={actionsTarget != null}

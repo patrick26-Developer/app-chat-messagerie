@@ -169,6 +169,16 @@ anglais, basé à Brazzaville.
   change d'avis après avoir refusé, aucun chemin n'existe pour initier une
   nouvelle demande dans l'autre sens sans reproduire le problème de lien
   réciproque déjà documenté pour `profiles`/`memberships`.
+- **Le blocage peut techniquement être contourné par la personne bloquée.**
+  B (le bloqué) peut techniquement écrire `chats.messagingBlocked: false`
+  lui-même via `chats.update` (ouvert à `isMember`), réactivant l'envoi
+  dans les deux sens SANS que la ligne `blocks` d'A soit supprimée — A
+  croit toujours avoir bloqué B (menu affiche "Débloquer"), mais l'effet
+  réel du blocage peut être contourné par B. Accepté pour cette itération
+  (l'UI ne propose ce bouton qu'au vrai bloqueur ; un contournement
+  demanderait d'écrire du code custom côté client). Piste de correctif :
+  restreindre l'écriture de `messagingBlocked` au seul blocker (bind dédié,
+  même famille qu'`isAdmin`).
 
 ## Sécurité — décisions connues
 
@@ -176,6 +186,17 @@ anglais, basé à Brazzaville.
   uniquement dans la chaîne d'outils Expo (xcode/config-plugins/cli), jamais
   bundlées dans l'app runtime. Confirmé le 2026-07-05. À réévaluer si
   CI/CD externe ajouté ou montée de version majeure Expo.
+
+## Dette technique connue
+
+- **`src/app/(tabs)/statuses.tsx:126` — accès à un ref pendant le rendu.**
+  `onViewableItemsChanged` est construit via `useRef(() => { ... }).current`
+  appelé directement dans le corps du composant (pas dans un effect/handler),
+  ce que React interdit (`Cannot access ref value during render`, détecté
+  par `eslint-config-expo`/`react-hooks` le 2026-07-13). Repéré hors scope
+  du chantier blocage/partage de contact en cours — pas corrigé à cette
+  occasion, à traiter séparément (probablement déplacer la construction du
+  callback dans un `useCallback`/`useEffect` plutôt que `useRef`).
 
 ## Incidents
 
