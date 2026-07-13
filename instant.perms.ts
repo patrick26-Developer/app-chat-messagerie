@@ -690,8 +690,19 @@ const rules = {
   //
   // `delete` (déblocage) : pas de bind réciproque `profiles` anticipé,
   // même constat que pour `contacts` (suppression ne déclenche jamais de
-  // vérification réciproque, seule la création via `.link()` le fait) — à
-  // reconfirmer empiriquement avant de considérer ça acquis.
+  // vérification réciproque, seule la création via `.link()` le fait).
+  // Reconfirmé empiriquement le 2026-07-13 via de vrais comptes
+  // `db.asUser()` (pas seulement `debugTransact`, par prudence — même si
+  // `blocker`/`blocked` sont forward, le champ réciproque concerné,
+  // `profiles.blockedByProfiles`, reste une étiquette reverse) : (1) A
+  // bloque B → réussit ; (2) B ne voit pas la ligne (`view: isBlocker`
+  // seul) → confirmé ; (3) B tente de se débloquer lui-même → bloqué ; (4)
+  // un tiers C tente de supprimer la ligne → bloqué ; (5) A supprime la
+  // ligne (déblocage réel) → réussit sans qu'aucun check réciproque sur
+  // `profiles` (côté B) n'interfère ; (6) auto-blocage (`blocker==blocked`)
+  // → bloqué par `isNotSelfBlock` ; (7) répétition de (5) sur une nouvelle
+  // ligne → réussit aussi. 9/9, données dev nettoyées après coup (aucune
+  // ligne `blocks` résiduelle).
   blocks: {
     bind: {
       isBlocker: "auth.id != null && auth.id in data.ref('blocker.$user.id')",
