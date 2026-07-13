@@ -126,13 +126,28 @@ anglais, basé à Brazzaville.
       non lus/groupes/communautés + raccourci vers Actualités
 - [X] Paramètres (settings.tsx) : thème clair/sombre/système, palette,
       langue FR/EN
+- [X] Édition/suppression de message (chat/[chatId].tsx) : long-press sur
+      une bulle m'appartenant → ActionSheet (Modifier/Supprimer/Annuler) ;
+      modifier réutilise le TextInput de composition (bannière "Modification
+      du message", update `text`+`editedAt` au lieu d'un nouveau message,
+      indicateur "(modifié)" sur la bulle) ; supprimer fait un soft-delete
+      (`text: ""` + `deletedAt`, confirmé par ConfirmDialog) avec placeholder
+      "message supprimé" et mise à jour de `lastMessagePreview` si c'était
+      le dernier message du chat ; aucun changement de permission requis
+      (`messages.update`/`delete` = `isSender` couvrait déjà le cas)
+      (commits 6917ed5, f5d0563, d3147df)
 - [ ] Actualités ("News") : route/i18n/chip existent, écran = stub vide
       (news.tsx n'affiche qu'un EmptyState, aucun contenu réel)
-- [ ] Blocage de contact, partage de contact : entrées de menu présentes
-      (chat-contact-menu.tsx) mais non implémentées (Alert "bientôt
-      disponible")
-- [ ] Édition/suppression de message : champs `editedAt`/`deletedAt`
-      déclarés dans le schéma (`messages`) mais aucune UI ne les utilise
+- [ ] Blocage de contact, partage de contact : schéma + permissions prêts
+      et testés (14/14) — `chats.messagingBlocked` (champ scalaire dénormalisé,
+      lu par `messages.isChatNotBlocked`), entité `blocks` dédiée
+      (`blocker`/`blocked` en étiquettes forward, `view: isBlocker` uniquement
+      pour que le bloqué ne soit jamais notifié), `messages.contactCard*`
+      (snapshot username/displayName/avatarPath, pas de lien InstantDB vers
+      le profil partagé — cf. section Incidents pour l'historique de ces
+      champs) — mais AUCUNE UI ne les consomme encore : entrées de menu
+      toujours en stub "bientôt disponible" (chat-contact-menu.tsx). Pas de
+      case à cocher tant que l'UI n'est pas livrée.
 - [ ] Notifications : rien de commencé (aucun schéma, aucune lib, aucun
       token push)
 
@@ -161,6 +176,40 @@ anglais, basé à Brazzaville.
   uniquement dans la chaîne d'outils Expo (xcode/config-plugins/cli), jamais
   bundlées dans l'app runtime. Confirmé le 2026-07-05. À réévaluer si
   CI/CD externe ajouté ou montée de version majeure Expo.
+
+## Incidents
+
+- **2026-07-13 — régression de schéma : champs encore utilisés supprimés
+  par erreur lors d'un refactor de nettoyage.** Le commit `6530cad`
+  ("refactor: remove unused message type and clean up schema definitions")
+  a retiré de `instant.schema.ts` : `chats.adminUserIds`, `chats.messagingBlocked`,
+  l'entité `blocks` entière (liens `blockBlocker`/`blockBlocked`), et
+  `messages.contactCardUsername`/`contactCardDisplayName`/`contactCardAvatarPath`
+  — sur la base d'un grep limité au code applicatif (`src/`), où effectivement
+  rien ne les référençait encore côté UI. Mais `instant.perms.ts` les
+  utilisait toujours activement : `chats.isAdmin` (`auth.id in data.adminUserIds`,
+  validée par 9 vérifications empiriques le 2026-07-10, condition du flux
+  "admin ajoute un membre" déjà en prod), `messages.isChatNotBlocked`
+  (`data.ref('chat.messagingBlocked')`), et tout le bloc de permissions
+  `blocks`. Détecté en tout début de session suivante, avant toute
+  écriture de code, en comparant systématiquement `instant.schema.ts` à
+  `instant.perms.ts` plutôt qu'en prenant le message du commit au mot.
+  Vérifié via `npx instant-cli push schema` après restauration : "No schema
+  changes to apply!" — la base InstantDB n'avait jamais reçu la version
+  amputée, donc aucun impact réel côté production (mais si elle avait été
+  poussée telle quelle, `isChatNotBlocked` aurait fait planter l'évaluation
+  CEL sur CHAQUE envoi de message, pas juste refusé la permission).
+  Corrigé par restauration à l'identique (commit `4ced7ad`), confirmée
+  `git diff <commit-avant-régression> -- instant.schema.ts` vide.
+  **Règle de prudence pour l'avenir** : avant de supprimer un champ, une
+  entité ou un lien dans `instant.schema.ts` au prétexte qu'il est "inutilisé",
+  grep son nom dans `instant.perms.ts` (pas seulement dans `src/`) — un champ
+  peut n'être consommé par AUCUN écran tout en étant une condition active
+  d'une règle de permission déjà en prod (denormalisation exprès pour éviter
+  une corrélation `data.ref()`, cf. patterns `adminUserIds`/`messagingBlocked`
+  ci-dessous). Si le grep dans `instant.perms.ts` remonte quoi que ce soit,
+  ne pas supprimer sans traiter aussi le fichier de permissions dans le même
+  commit.
 
 ## Patterns retenus
 
