@@ -17,13 +17,20 @@ export function useRegisterPushToken(): void {
   const { profile } = useOwnProfile();
 
   useEffect(() => {
-    if (!profile || !Device.isDevice) return;
+    // DIAGNOSTIC TEMPORAIRE — logs à retirer une fois la cause de l'échec silencieux trouvée.
+    if (!profile || !Device.isDevice) {
+      console.log("[useRegisterPushToken] arrêt précoce: profile=", Boolean(profile), "isDevice=", Device.isDevice);
+      return;
+    }
 
     (async () => {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       const finalStatus =
         existingStatus === "granted" ? existingStatus : (await Notifications.requestPermissionsAsync()).status;
-      if (finalStatus !== "granted") return;
+      if (finalStatus !== "granted") {
+        console.log("[useRegisterPushToken] permission non accordée:", finalStatus);
+        return;
+      }
 
       if (Platform.OS === "android") {
         await Notifications.setNotificationChannelAsync("default", {
@@ -34,13 +41,19 @@ export function useRegisterPushToken(): void {
       }
 
       const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-      if (!projectId) return;
+      if (!projectId) {
+        console.log("[useRegisterPushToken] projectId introuvable dans Constants.expoConfig");
+        return;
+      }
 
+      console.log("[useRegisterPushToken] appel getExpoPushTokenAsync avec projectId=", projectId);
       const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+      console.log("[useRegisterPushToken] token obtenu:", token);
       const currentTokens = Array.isArray(profile.pushTokens) ? profile.pushTokens : [];
       if (currentTokens.includes(token)) return;
 
       await db.transact(db.tx.profiles[profile.id].update({ pushTokens: [...currentTokens, token] }));
-    })().catch(() => {});
+      // DIAGNOSTIC TEMPORAIRE — à retirer une fois la cause de l'échec silencieux trouvée.
+    })().catch((error) => console.error("[useRegisterPushToken] échec:", error));
   }, [profile]);
 }
