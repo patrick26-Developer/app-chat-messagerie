@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { MessageCircle, Search } from "lucide-react-native";
-import { Avatar, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
+import { Avatar, Badge, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
 import { OnlineContactsRow } from "@/components/online-contacts-row";
 import { db } from "@/lib/db";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
@@ -42,6 +42,7 @@ export default function DiscussionsScreen() {
             $: { where: { "profile.id": profile.id } },
             chat: {
               memberships: { profile: {} },
+              messages: { sender: {} },
             },
           },
         }
@@ -86,6 +87,19 @@ export default function DiscussionsScreen() {
   }
 
   const filteredConversations = conversations.filter((membership) => matchesChip(membership) && matchesQuery(membership));
+
+  // Exclut mes propres messages : envoyer un message ne doit pas se compter
+  // comme "non lu" pour moi-même (sinon le badge resterait affiché sur mes
+  // propres discussions juste après y avoir écrit, `lastReadAt` n'étant
+  // bumpé qu'à l'ouverture du chat, pas à chaque envoi).
+  function getUnreadCount(membership: (typeof conversations)[number]): number {
+    const chat = membership.chat;
+    if (!chat) return 0;
+    const lastReadAt = new Date(membership.lastReadAt).getTime();
+    return (chat.messages ?? []).filter(
+      (message) => message.sender?.id !== profile?.id && new Date(message.createdAt).getTime() > lastReadAt,
+    ).length;
+  }
 
   return (
     <ScreenContainer>
@@ -152,6 +166,7 @@ export default function DiscussionsScreen() {
             });
 
             const isOtherOnline = !chat.isGroup && otherMember ? onlineIds.has(otherMember.id) : false;
+            const unreadCount = getUnreadCount(membership);
 
             return (
               <ListItem
@@ -162,9 +177,12 @@ export default function DiscussionsScreen() {
                 subtitle={chat.lastMessagePreview}
                 onPress={() => router.push({ pathname: "/chat/[chatId]", params: { chatId: chat.id } })}
                 trailing={
-                  <Text className="text-xs" style={{ color: colors.textMuted }}>
-                    {time}
-                  </Text>
+                  <View className="flex-row items-center gap-2">
+                    {unreadCount > 0 ? <Badge label={unreadCount} /> : null}
+                    <Text className="text-xs" style={{ color: colors.textMuted }}>
+                      {time}
+                    </Text>
+                  </View>
                 }
               />
             );
