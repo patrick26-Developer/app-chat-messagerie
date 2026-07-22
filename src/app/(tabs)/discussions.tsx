@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { MessageCircle, Search } from "lucide-react-native";
 import { Avatar, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
+import { OnlineContactsRow } from "@/components/online-contacts-row";
 import { db } from "@/lib/db";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
@@ -89,6 +90,8 @@ export default function DiscussionsScreen() {
   return (
     <ScreenContainer>
       <View className="px-4 pt-3">
+        <OnlineContactsRow />
+
         <View
           className="flex-row items-center gap-2 rounded-full px-3"
           style={{ backgroundColor: colors.inputBackground, paddingVertical: 7 }}
