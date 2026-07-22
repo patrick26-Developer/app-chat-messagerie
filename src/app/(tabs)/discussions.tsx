@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { MessageCircle, Search } from "lucide-react-native";
 import { Avatar, Badge, EmptyState, ListItem, ScreenContainer } from "@/components/ui";
 import { OnlineContactsRow } from "@/components/online-contacts-row";
+import { DiscussionsFabMenu } from "@/components/discussions-fab-menu";
 import { db } from "@/lib/db";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useOnlineProfileIds } from "@/lib/presence";
@@ -189,6 +190,8 @@ export default function DiscussionsScreen() {
           })}
         </ScrollView>
       )}
+
+      <DiscussionsFabMenu />
     </ScreenContainer>
   );
 }
