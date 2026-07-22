@@ -66,6 +66,13 @@ anglais, basé à Brazzaville.
   validation, puis exécuter.
 - Ne jamais introduire de nouvelle dépendance sans le dire explicitement
   dans la réponse.
+- **Build Android : EAS (`npx eas build --profile development --platform
+  android`), pas de build local `gradlew`/`expo run:android` sur cette
+  machine.** Confirmé explicitement par l'utilisateur le 2026-07-21 ("c'est
+  la méthode que j'utilise habituellement") après qu'un essai de build
+  local a buté sur un environnement Android/NDK peu fiable ici (cf.
+  Incidents) — préférence à respecter par défaut pour toute future demande
+  de build Android, sauf indication contraire.
 
 ## Méthodologie de test des permissions
 
@@ -188,8 +195,51 @@ anglais, basé à Brazzaville.
       snapshot) avant de naviguer vers contact-details, avec une alerte de
       repli si ce profil n'existe plus. "Modifier" exclu de l'ActionSheet
       pour ce type (rien de libre à éditer), "Supprimer" inchangé.
-- [ ] Notifications : rien de commencé (aucun schéma, aucune lib, aucun
-      token push)
+- [ ] Notifications : en cours, pas encore fonctionnel bout-en-bout.
+      Schéma (`profiles.pushTokens: i.json<string[]>().optional()`, poussé
+      et confirmé en sync via `npx instant-cli push schema`), lib
+      (`expo-notifications`/`expo-device`) et hook `useRegisterPushToken`
+      (src/lib/pushNotifications.ts, monté dans `_layout.tsx`) en place.
+      **Obtention du token Expo confirmée sur device physique** (log
+      "token obtenu: ExponentPushToken[...]"), mais **l'écriture dans
+      `profiles.pushTokens` ne s'est jamais produite** : requête admin sur
+      le profil de test (mb.patrickdegrace@gmail.com, 2026-07-18) montre
+      le champ totalement absent (pas un tableau vide — absent). La règle
+      de permission `profiles.update` (`isOwner`, cf. instant.perms.ts)
+      n'est a priori pas en cause (même règle déjà validée en prod pour
+      bio/phone/displayName via edit-profile.tsx). Cause non identifiée —
+      hypothèse à vérifier en premier : l'app a pu être fermée juste après
+      le log "token obtenu" (avant que le `db.transact()` asynchrone
+      n'ait eu le temps d'atteindre le serveur). Log de succès ajouté
+      après le `db.transact()` (`"db.transact réussi, pushTokens mis à
+      jour..."`) pour distinguer ce cas d'un vrai échec de permission au
+      prochain test device — les deux logs diagnostic temporaires restent
+      en place. Script `scripts/check-push-token.mjs` ajouté pour
+      revérifier l'état du champ côté admin sans repasser par l'UI.
+      Prochaine étape : relancer l'app sur device, laisser tourner
+      quelques secondes après "token obtenu", relever lequel des deux logs
+      (succès ou "échec:") apparaît.
+- [X] Remplacement du logo (2026-07-21) : l'ancien design (bulle bleue +
+      éclair blanc/cyan, `#208AEF`) reprenait visuellement l'icône Facebook
+      Messenger — contraire à la règle "aucun logo de marque" de ce fichier.
+      Remplacé par `true-logo` (cercle noir + marque "C"/éclair blanche) sur
+      `icon.png`, `splash-icon.png`, `android-icon-foreground.png`,
+      `android-icon-monochrome.png` (ce dernier était vide/cassé avant,
+      corrigé au passage). `assets/images/true-logo.png` (source, 1254x1254,
+      RGB opaque sans alpha à l'origine — donc un vrai "rectangle noir" dans
+      les coins) traité par un script Node/pngjs ponctuel : masque alpha
+      circulaire (rayon = `min(w,h)/2`, feather 2px), coins désormais
+      transparents, cercle + marque conservés tels quels. `icon.png` = ce
+      même cercle aplati sur fond noir opaque (iOS n'accepte pas l'alpha sur
+      l'icône et arrondit lui-même les coins) ; `splash-icon.png` = version
+      transparente telle quelle (repose sur le `backgroundColor` du splash) ;
+      `android-icon-foreground.png`/`monochrome.png` = `true-logo-removebg-
+      preview.png` tel quel (juste la marque, transparent, Android fournit le
+      fond séparément). `app.json` : `backgroundColor` du splash et de
+      l'`adaptiveIcon` Android passés de `#208AEF` à `#000000` pour matcher
+      le cercle noir. Build EAS Android (`development`) confirmé réussi
+      (build 472a24a0) — vérification visuelle sur device via l'APK
+      téléchargé restait à faire par l'utilisateur au moment d'écrire ceci.
 
 ## Limitations connues (contraintes de permissions, pas de simples écrans manquants)
 
@@ -271,6 +321,38 @@ anglais, basé à Brazzaville.
   ci-dessous). Si le grep dans `instant.perms.ts` remonte quoi que ce soit,
   ne pas supprimer sans traiter aussi le fichier de permissions dans le même
   commit.
+
+- **2026-07-21 — build local Android cassé par un kill de tâche en plein
+  téléchargement du NDK.** Un premier essai de `gradlew assembleDebug` en
+  arrière-plan a été tué au bout de 10 min (limite de l'outil bash de la
+  session) pendant que Gradle/AGP téléchargeait le NDK
+  (`27.1.12297006`) — résultat : un dossier NDK partiel/cassé (juste un
+  sous-dossier `.installer` vide, sans `source.properties`). L'essai
+  suivant a échoué immédiatement avec `[CXX1101] NDK ... did not have a
+  source.properties file`, Gradle ne retentant pas le téléchargement tant
+  que le dossier existe. Corrigé en supprimant ce dossier NDK partiel
+  (`Sdk/ndk/27.1.12297006`) pour forcer un téléchargement propre au prochain
+  essai — mais le build local a finalement été abandonné au profit d'EAS
+  (cf. section "Méthode de travail" ci-dessus), donc ce correctif n'a pas
+  été revérifié jusqu'au bout. Si un build local Android est retenté un
+  jour sur cette machine : lancer `gradlew` en processus détaché
+  (`nohup ... & disown` + log fichier + polling), jamais via le
+  `run_in_background` de l'outil bash seul, qui tue le process au bout de
+  10 min quoi qu'il arrive.
+- **2026-07-21 — builds EAS bloqués par `expo-doctor` : dépendances Expo
+  désynchronisées de la version du SDK, préexistant, indépendant du
+  chantier logo.** 19 packages (`expo`, `expo-router`, `expo-notifications`,
+  etc.) étaient en retard sur les versions attendues par Expo SDK
+  `57.0.7` (ex. `expo@57.0.2` alors que `~57.0.7` attendu) — `expo-doctor`
+  échoue sur ce check et EAS l'exécute en préflight, donc **tout** build EAS
+  échouait avant même de compiler quoi que ce soit. Corrigé par
+  `npx expo install --fix` (deux passes : d'abord `expo` lui-même, puis les
+  15 autres packages sous la version mise à jour) ; `expo-doctor` repasse à
+  20/20 après coup. A fait remonter `expo-image`/`expo-status-bar`/
+  `expo-web-browser` comme plugins dans `app.json` (ajout automatique par la
+  commande, normal). **Règle de prudence** : avant tout futur build EAS,
+  lancer `CI=1 npx expo-doctor` (ou `npx expo install --check`) en préflight
+  pour éviter de gaspiller une queue/build EAS sur un échec évitable.
 
 ## Patterns retenus
 

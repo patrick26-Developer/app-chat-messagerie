@@ -53,6 +53,7 @@ export function useRegisterPushToken(): void {
       if (currentTokens.includes(token)) return;
 
       await db.transact(db.tx.profiles[profile.id].update({ pushTokens: [...currentTokens, token] }));
+      console.log("[useRegisterPushToken] db.transact réussi, pushTokens mis à jour pour profile.id=", profile.id);
       // DIAGNOSTIC TEMPORAIRE — à retirer une fois la cause de l'échec silencieux trouvée.
     })().catch((error) => console.error("[useRegisterPushToken] échec:", error));
   }, [profile]);
